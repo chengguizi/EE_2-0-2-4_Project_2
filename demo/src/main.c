@@ -18,10 +18,67 @@
 #include "acc.h"
 #include "oled.h"
 #include "rgb.h"
+#include "light.h"
+#include "temp.h"
 
 #include "led7seg.h"
 
+#define MODE_CAT 		1
+#define MODE_ACTIVE 	2
+#define MODE_NONE		0
+
+static volatile uint8_t master_mode = MODE_NONE;
 static uint8_t barPos = 2;
+
+volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
+
+
+uint8_t getSW4() // active low
+{
+	return (GPIO_ReadValue(1) >> 31 & 0x01);
+}
+
+void SysTick_Handler(void) {
+
+	static uint8_t debounce_tick = 0;
+	static uint8_t blocking = 0;
+
+	msTicks++;
+
+	if (!blocking && getSW4() == 0) // active low
+		debounce_tick++;
+	else
+	{
+		debounce_tick = 0;
+		blocking = 0;
+	}
+
+
+	if (debounce_tick >= 10)
+	{
+		debounce_tick = 0;
+		blocking = 1;
+
+		switch (master_mode)
+		{
+		case MODE_NONE:
+			master_mode = MODE_CAT;
+			break;
+		case MODE_CAT:
+			master_mode = MODE_ACTIVE;
+			break;
+		case MODE_ACTIVE:
+			master_mode = MODE_CAT;
+			break;
+		}
+	}
+
+}
+
+uint32_t getMsTick(void)
+{
+	return msTicks;
+}
 
 static void moveBar(uint8_t steps, uint8_t dir)
 {
@@ -285,12 +342,66 @@ static void init_GPIO(void)
 }
 
 
-int main (void) {
 
+static void init_CAT()
+{
+    led7seg_setChar (0xFF,1); // Raw mode, clear the Display
+	oled_clearScreen(OLED_COLOR_BLACK); // OFF THE DISPLAY
+	pca9532_setLeds (0x0000,0xFFFF); // Turn off all LEDs
+	rgb_setLeds (0);
+	// SCAN TURN OFF
+
+}
+
+// QUESTION - Why use "static"
+static void init_pre_CAT()
+{
+	init_CAT();
+}
+
+static void welcome_screen()
+{
+	oled_putString (35,1, "I-WATCH", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+}
+
+static void mode_CAT()
+{
+	uint8_t i;
+	init_CAT();
+	welcome_screen();
+	Timer0_Wait(1000);
+
+	rgb_setLeds (RGB_BLUE);
+	Timer0_Wait(4000);
+	rgb_setLeds (RGB_RED);
+	Timer0_Wait(4000);
+
+
+	for(i=0;i<6;i++)
+	{
+		led7seg_setChar ('0'+i,0);
+		Timer0_Wait(1000);
+	}
+
+	for (i=0;i<16;i++)
+	{
+		pca9532_setLeds (1<<i,0x0000);
+		Timer0_Wait(250);
+	}
+
+}
+
+////////////////////////////////////////////
+//////// MAIN FUNCTION /////////////////////
+////////////////////////////////////////////
+
+int main (void) {
 
     int32_t xoff = 0;
     int32_t yoff = 0;
     int32_t zoff = 0;
+
+    uint32_t lux = 0;
 
     int8_t x = 0;
 
@@ -304,6 +415,8 @@ int main (void) {
     uint8_t btn1 = 1;
     uint8_t btn2 = 1;
 
+    uint8_t oled_string[15] = {};
+
 
     init_i2c();
     init_ssp();
@@ -313,10 +426,11 @@ int main (void) {
     joystick_init();
     acc_init();
     oled_init();
+    rgb_init ();
 
     led7seg_init();
 
-
+    light_enable();
 
     /*
      * Assume base board in zero-g position when reading first value.
@@ -343,8 +457,15 @@ int main (void) {
     /* <---- Speaker ------ */
 
     moveBar(1, dir);
-    oled_clearScreen(OLED_COLOR_BLACK);
 
+    /* System Clock */
+    SysTick_Config(SystemCoreClock / 1000); // Configure the SysTick interrupt to occur every 1ms
+    // By Default SysTick is disabled
+
+    /* Temperature Sensor */
+    temp_init (&getMsTick);  //Initialize Temp Sensor driver
+
+    init_pre_CAT();
 
     uint8_t prev_mode = master_mode;
     while (1)
@@ -369,6 +490,17 @@ int main (void) {
         x = x+xoff;
         y = y+yoff;
         z = z+zoff;
+
+        lux = light_read();
+
+
+        printf("The value of temp. sensor: %d\n", temp_read());
+
+
+        sprintf (oled_string,"%03u",lux);
+
+        oled_putString (35,1, "LIGHT", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+        oled_putString (35,33, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
         if (y < 0) {
             dir = 1;

@@ -85,8 +85,11 @@ static uint8_t chars[] = {
 void led7seg_init (void)
 {
     //GPIO_SetDir( 2, 2, 1 );
-	GPIO_SetDir( 2, (1<<2), 1 );
-    LED7_CS_OFF();
+	LED7_CS_OFF(); // Pull UP the RCK (parallel load clock),
+	GPIO_SetDir( 2, (1<<2), 1 ); // 1 means OUTPUT
+
+
+
 }
 
 /******************************************************************************
