@@ -346,6 +346,18 @@ int main (void) {
     oled_clearScreen(OLED_COLOR_BLACK);
 
 
+    uint8_t prev_mode = master_mode;
+    while (1)
+    {
+    	if (master_mode != prev_mode)
+    	{
+    		if (master_mode == MODE_CAT)
+    			mode_CAT();
+
+    		prev_mode = master_mode;
+    	}
+
+    }
 
     while (1)
     {
