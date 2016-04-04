@@ -361,7 +361,11 @@ static void init_pre_CAT()
 
 static void welcome_screen()
 {
-	oled_putString (35,1, "I-WATCH", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (25,1, "I-WATCH", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (3,13, "Electronic Tag", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (7,26, "Configuration", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (13,39, "and Testing", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (36,52, "Mode", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 }
 
 static void mode_CAT()
