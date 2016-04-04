@@ -389,8 +389,26 @@ static void welcome_screen()
 static void mode_CAT()
 {
 	uint8_t i;
+
 	init_CAT();
+	oled_off (); // display OFF
+	oled_on();
+	oled_gpu_scroll();
+
 	welcome_screen();
+
+	/*for (i=0;i<=0x40;i++)
+	{
+		oled_VRoll(0);
+		if (Timer_SW4(10)) return;
+	}*/
+
+	//oled_gpu_Hscroll();
+
+
+	Timer_SW4(1500);
+	oled_command(0x2E); //stop scrolling
+
 	rgb_setLeds (RGB_BLUE);
 	if (Timer_SW4(4000)) return;
 	rgb_setLeds (RGB_RED);
@@ -476,8 +494,6 @@ int main (void) {
     GPIO_ClearValue(2, 1<<13); //LM4811-shutdn
 
     /* <---- Speaker ------ */
-
-    moveBar(1, dir);
 
     /* System Clock */
     SysTick_Config(SystemCoreClock / 1000); // Configure the SysTick interrupt to occur every 1ms

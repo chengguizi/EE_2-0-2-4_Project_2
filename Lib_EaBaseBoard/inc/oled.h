@@ -29,6 +29,12 @@ void oled_clearScreen(oled_color_t color);
 void oled_putString(uint8_t x, uint8_t y, uint8_t *pStr, oled_color_t fb,
         oled_color_t bg);
 uint8_t oled_putChar(uint8_t x, uint8_t y, uint8_t ch, oled_color_t fb, oled_color_t bg);
+void oled_VRoll(uint8_t reset);
+void oled_gpu_Hscroll (void);
+void oled_gpu_scroll (void);
+void oled_command (uint8_t cmd);
+void oled_off ();
+void oled_on ();
 
 
 #endif /* end __OLED_H */

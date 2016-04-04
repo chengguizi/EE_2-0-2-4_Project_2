@@ -47,6 +47,7 @@
  * on the base board is 96x64.
  */
 #define X_OFFSET 18
+#define Y_OFFSET 0x40
 
 #define SHADOW_FB_SIZE (OLED_DISPLAY_WIDTH*OLED_DISPLAY_HEIGHT >> 3)
 
@@ -226,6 +227,59 @@ writeDataLen(unsigned char data, unsigned int len)
 #endif
 }
 
+void oled_VRoll (uint8_t reset)
+{
+	static uint8_t offset = Y_OFFSET;
+	if (!offset)
+		offset = Y_OFFSET;
+	else
+		offset--;
+
+    writeCommand(0x29);//(set display offset)
+    writeCommand(offset);
+}
+
+void oled_gpu_Hscroll (void)
+{
+	writeCommand(0x26); // 26 - right, 27 - left
+	writeCommand(0x02); // pixel / each scroll
+	writeCommand(0x02); // page number 2~7
+	writeCommand(0x06); // 000b – 6 frames 100b – 3 frames 101b – 4 frames 110b – 2 frame
+	writeCommand(0x02); // page number 2~7
+	writeCommand(0x2F); // start scrolling
+}
+
+void oled_gpu_scroll (void)
+{
+	writeCommand(0xA3); // Set Vertical Scroll
+	writeCommand(0x00); // first row
+	writeCommand(0x40); // last row
+
+	writeCommand(0x29); // Vertical and right scroll, 0x2A left scroll
+	writeCommand(0x00); // Horizontal Rate
+	writeCommand(0x00); // Start Page
+	writeCommand(0x06); // time interval? 110b – 2 frame
+	writeCommand(0x07); // End Page
+	writeCommand(0x01);	// Vertical Rate
+
+	writeCommand(0x2F); // start scrolling
+}
+
+
+void oled_off ()
+{
+	writeCommand(0xAE);
+}
+
+void oled_on ()
+{
+	writeCommand(0xAF);
+}
+
+void oled_command (uint8_t cmd)
+{
+	writeCommand(cmd);
+}
 
 /******************************************************************************
  *
@@ -245,9 +299,11 @@ runInitSequence(void)
     writeCommand(0x40);//(display start set)
     writeCommand(0x2e);//(stop horzontal scroll)
     writeCommand(0x81);//(set contrast control register)
-    writeCommand(0x32);
+    //writeCommand(0x32);
+    writeCommand(0x01);
     writeCommand(0x82);//(brightness for color banks)
-    writeCommand(0x80);//(display on)
+    //writeCommand(0x80);//(display on)
+    writeCommand(0x01);//(display on) modified
     writeCommand(0xa1);//(set segment re-map)
     writeCommand(0xa6);//(set normal/inverse display)
     //  writeCommand(0xa7);//(set inverse display)
