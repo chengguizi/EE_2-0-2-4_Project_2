@@ -28,6 +28,8 @@
 #define MODE_NONE		0
 
 static volatile uint8_t master_mode = MODE_NONE;
+static volatile uint8_t prev_mode = MODE_NONE;
+
 static uint8_t barPos = 2;
 
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
@@ -36,6 +38,23 @@ volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
 uint8_t getSW4() // active low
 {
 	return (GPIO_ReadValue(1) >> 31 & 0x01);
+}
+
+uint8_t Timer_with_StateCheck (uint32_t time, volatile uint8_t *state, volatile uint8_t *prev_state)
+{
+	uint32_t i;
+	for (i=0;i<time;i++)
+	{
+		Timer0_Wait(1);
+		if (*state != *prev_state)
+			return 1;
+	}
+	return 0;
+}
+
+uint8_t Timer_SW4(uint32_t time)
+{
+	return Timer_with_StateCheck(time, &master_mode, &prev_mode);
 }
 
 void SysTick_Handler(void) {
@@ -48,11 +67,10 @@ void SysTick_Handler(void) {
 	if (!blocking && getSW4() == 0) // active low
 		debounce_tick++;
 	else
-	{
 		debounce_tick = 0;
-		blocking = 0;
-	}
 
+	if (blocking && getSW4() == 1 )
+		blocking = 0;
 
 	if (debounce_tick >= 10)
 	{
@@ -373,25 +391,24 @@ static void mode_CAT()
 	uint8_t i;
 	init_CAT();
 	welcome_screen();
-	Timer0_Wait(1000);
-
 	rgb_setLeds (RGB_BLUE);
-	Timer0_Wait(4000);
+	if (Timer_SW4(4000)) return;
 	rgb_setLeds (RGB_RED);
-	Timer0_Wait(4000);
-
+	if (Timer_SW4(4000)) return;
 
 	for(i=0;i<6;i++)
 	{
 		led7seg_setChar ('0'+i,0);
-		Timer0_Wait(1000);
+		if (Timer_SW4(1000)) return;
 	}
 
 	for (i=0;i<16;i++)
 	{
 		pca9532_setLeds (1<<i,0x0000);
-		Timer0_Wait(250);
+		if (Timer_SW4(250)) return;
 	}
+
+	return;
 
 }
 
@@ -471,15 +488,15 @@ int main (void) {
 
     init_pre_CAT();
 
-    uint8_t prev_mode = master_mode;
     while (1)
     {
     	if (master_mode != prev_mode)
     	{
+    		prev_mode = master_mode;
+
     		if (master_mode == MODE_CAT)
     			mode_CAT();
 
-    		prev_mode = master_mode;
     	}
 
     }
