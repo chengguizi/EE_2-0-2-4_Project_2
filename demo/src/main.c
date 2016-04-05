@@ -106,21 +106,28 @@ void set_active_mod (uint32_t lux)
 				light_setHiThreshold(49);
 				light_setLoThreshold(0);
 				active_mode = ACTIVE_PS;
-				printf("I'm in Active_PS=%d!\n",lux);
+				//printf("I'm in Active_PS=%d!\n",lux);
+				oled_putString (0,0, "ACTIVE - PS", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+				oled_putString (40,10, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (40,20, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
 			}
 			else if (lux > 900)
 			{
 				light_setHiThreshold(1000);
 				light_setLoThreshold(901);
 				active_mode = ACTIVE_FP;
-				printf("I'm in Active_FP=%d!\n",lux);
+				//printf("I'm in Active_FP=%d!\n",lux);
+				oled_putString (0,0, "ACTIVE - FP", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 			}
 			else
 			{
 				light_setHiThreshold(900);
 				light_setLoThreshold(50);
 				active_mode = ACTIVE_NO;
-				printf("I'm in Active_NO=%d!\n",lux);
+				//printf("I'm in Active_NO=%d!\n",lux);
+				oled_putString (0,0, "ACTIVE - NO", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 			}
 }
 
@@ -483,13 +490,19 @@ static void mode_ACTIVE ()
 	if(bat>=0)
 		pca9532_setLeds (1<<bat,0x0000);
 
+	oled_clearScreen(OLED_COLOR_BLACK);
     //light_setHiThreshold(1000);
     //light_setLoThreshold(1000);
 
 	set_active_mod( light_read() );
 
+	oled_putString (00,10, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (00,20, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
     light_clearIrqStatus();
     NVIC_EnableIRQ(EINT3_IRQn);
+
+
 	//uint32_t lux = light_read();
 
 	printf("====YOU JUST ENTER ACTIVE MODE====,bat=%d\n",bat);
@@ -508,6 +521,7 @@ int main (void) {
     int32_t zoff = 0;
 
     uint32_t lux = 0;
+    int32_t T;
 
     int8_t x = 0;
 
@@ -619,9 +633,22 @@ int main (void) {
     		}
 
     		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
-    		if (msTicks - prev_sensor_sampling >= 4000)
+    		if (active_mode == ACTIVE_NO && (msTicks - prev_sensor_sampling >= 4000) )
     		{
-    			printf("4 Sec has passed\n"); // update sensors HERE
+    			// light sensor
+    			sprintf (oled_string,"%3u",light_read()); 	// %6d (print as a decimal integer with a width of at least 6 wide)
+    												// %3.2f	(print as a floating point at least 3 wide and a precision of 2)
+    			oled_putString (40,10, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    			sprintf (oled_string,"%3.1f",temp_read()/10.0);
+    			oled_putString (40,20, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    	        acc_read(&x, &y, &z);
+    	        x = x+xoff;
+    	        y = y+yoff;
+    	        z = z+zoff;
+
+    			//printf("4 Sec has passed\n"); // update sensors HERE
     			prev_sensor_sampling = msTicks;
     		}
 
@@ -636,10 +663,7 @@ int main (void) {
         /* ####### Accelerometer and LEDs  ###### */
         /* # */
 
-        acc_read(&x, &y, &z);
-        x = x+xoff;
-        y = y+yoff;
-        z = z+zoff;
+
 
         lux = light_read();
 
