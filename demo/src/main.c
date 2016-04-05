@@ -26,8 +26,15 @@
 #define MODE_CAT 		1
 #define MODE_ACTIVE 	2
 #define MODE_NONE		0
+#define ACTIVE_PS		0
+#define ACTIVE_NO		1
+#define ACTIVE_FP		2
 
 static volatile uint8_t master_mode = MODE_NONE;
+static volatile uint8_t prev_mode = MODE_NONE;
+static volatile uint8_t active_mode = ACTIVE_NO;
+static volatile int8_t bat = -1;
+
 static uint8_t barPos = 2;
 
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
@@ -36,6 +43,23 @@ volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
 uint8_t getSW4() // active low
 {
 	return (GPIO_ReadValue(1) >> 31 & 0x01);
+}
+
+uint8_t Timer_with_StateCheck (uint32_t time, volatile uint8_t *state, volatile uint8_t *prev_state)
+{
+	uint32_t i;
+	for (i=0;i<time;i++)
+	{
+		Timer0_Wait(1);
+		if (*state != *prev_state)
+			return 1;
+	}
+	return 0;
+}
+
+uint8_t Timer_SW4(uint32_t time)
+{
+	return Timer_with_StateCheck(time, &master_mode, &prev_mode);
 }
 
 void SysTick_Handler(void) {
@@ -48,11 +72,10 @@ void SysTick_Handler(void) {
 	if (!blocking && getSW4() == 0) // active low
 		debounce_tick++;
 	else
-	{
 		debounce_tick = 0;
-		blocking = 0;
-	}
 
+	if (blocking && getSW4() == 1 )
+		blocking = 0;
 
 	if (debounce_tick >= 10)
 	{
@@ -73,6 +96,53 @@ void SysTick_Handler(void) {
 		}
 	}
 
+
+}
+
+void set_active_mod (uint32_t lux)
+{
+			if (lux < 50)
+			{
+				light_setHiThreshold(49);
+				light_setLoThreshold(0);
+				active_mode = ACTIVE_PS;
+				//printf("I'm in Active_PS=%d!\n",lux);
+				oled_putString (0,0, "ACTIVE - PS", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+				oled_putString (40,10, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (40,20, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+			}
+			else if (lux > 900)
+			{
+				light_setHiThreshold(1000);
+				light_setLoThreshold(901);
+				active_mode = ACTIVE_FP;
+				//printf("I'm in Active_FP=%d!\n",lux);
+				oled_putString (0,0, "ACTIVE - FP", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+			}
+			else
+			{
+				light_setHiThreshold(900);
+				light_setLoThreshold(50);
+				active_mode = ACTIVE_NO;
+				//printf("I'm in Active_NO=%d!\n",lux);
+				oled_putString (0,0, "ACTIVE - NO", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+			}
+}
+
+void EINT3_IRQHandler(void)
+{
+	uint32_t lux = light_read();
+	if (LPC_GPIOINT->IO2IntStatF >> 5 & 0x1)
+	{
+		set_active_mod(lux);
+
+		light_clearIrqStatus();
+		LPC_GPIOINT->IO2IntClr = 1 << 5; // Port2.5, light sensor
+	}
+
+	NVIC_ClearPendingIRQ(EINT3_IRQn);
 }
 
 uint32_t getMsTick(void)
@@ -345,6 +415,7 @@ static void init_GPIO(void)
 
 static void init_CAT()
 {
+	bat = -1;
     led7seg_setChar (0xFF,1); // Raw mode, clear the Display
 	oled_clearScreen(OLED_COLOR_BLACK); // OFF THE DISPLAY
 	pca9532_setLeds (0x0000,0xFFFF); // Turn off all LEDs
@@ -371,29 +442,73 @@ static void welcome_screen()
 static void mode_CAT()
 {
 	uint8_t i;
+
+	NVIC_DisableIRQ(EINT3_IRQn);
+	printf("====YOU JUST ENTER CAT MODE====\n");
 	init_CAT();
+	oled_off (); // display OFF
+	oled_on();
+	oled_gpu_scroll();
+
 	welcome_screen();
-	Timer0_Wait(1000);
+
+	/*for (i=0;i<=0x40;i++)
+	{
+		oled_VRoll(0);
+		if (Timer_SW4(10)) return;
+	}*/
+
+	//oled_gpu_Hscroll();
+
+
+	Timer_SW4(1500);
+	oled_command(0x2E); //stop scrolling
 
 	rgb_setLeds (RGB_BLUE);
-	Timer0_Wait(4000);
+	if (Timer_SW4(4000)) return;
 	rgb_setLeds (RGB_RED);
-	Timer0_Wait(4000);
-
+	if (Timer_SW4(4000)) return;
 
 	for(i=0;i<6;i++)
 	{
 		led7seg_setChar ('0'+i,0);
-		Timer0_Wait(1000);
+		if (Timer_SW4(1000)) return;
 	}
 
-	for (i=0;i<16;i++)
+	for (bat=0;bat<16;bat++)
 	{
-		pca9532_setLeds (1<<i,0x0000);
-		Timer0_Wait(250);
+		pca9532_setLeds (1<<bat,0x0000);
+		if (Timer_SW4(250)) return;
 	}
+
+	return;
 
 }
+
+static void mode_ACTIVE ()
+{
+	if(bat>=0)
+		pca9532_setLeds (1<<bat,0x0000);
+
+	oled_clearScreen(OLED_COLOR_BLACK);
+    //light_setHiThreshold(1000);
+    //light_setLoThreshold(1000);
+
+	set_active_mod( light_read() );
+
+	oled_putString (00,10, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (00,20, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    light_clearIrqStatus();
+    NVIC_EnableIRQ(EINT3_IRQn);
+
+
+	//uint32_t lux = light_read();
+
+	printf("====YOU JUST ENTER ACTIVE MODE====,bat=%d\n",bat);
+}
+
+
 
 ////////////////////////////////////////////
 //////// MAIN FUNCTION /////////////////////
@@ -406,6 +521,7 @@ int main (void) {
     int32_t zoff = 0;
 
     uint32_t lux = 0;
+    int32_t T;
 
     int8_t x = 0;
 
@@ -460,8 +576,6 @@ int main (void) {
 
     /* <---- Speaker ------ */
 
-    moveBar(1, dir);
-
     /* System Clock */
     SysTick_Config(SystemCoreClock / 1000); // Configure the SysTick interrupt to occur every 1ms
     // By Default SysTick is disabled
@@ -471,15 +585,74 @@ int main (void) {
 
     init_pre_CAT();
 
-    uint8_t prev_mode = master_mode;
+    /* set light sensor interrupt */
+    NVIC_SetPriorityGrouping(5);
+    GPIO_SetDir(2, 1<<5, 0); // 0: Input
+    // init light sensor interrupt related reg
+
+    light_setIrqInCycles(LIGHT_CYCLE_4);
+
+    // Enable GPIO Interrupt at PIN
+    LPC_GPIOINT->IO2IntEnF |= 1<<5; //Port2.5, light sensor
+
+
+
+    /*********/
+
+	uint32_t prev_bat_sampling = 0;
+	uint32_t prev_sensor_sampling = 0;
+
     while (1)
     {
     	if (master_mode != prev_mode)
     	{
+    		prev_mode = master_mode;
+
     		if (master_mode == MODE_CAT)
     			mode_CAT();
+    		else if (master_mode == MODE_ACTIVE)
+    			mode_ACTIVE();
+    	}
 
-    		prev_mode = master_mode;
+
+    	if(master_mode == MODE_ACTIVE)
+    	{
+
+    		//if ((msTicks >> 7 & 0x01) && !(prev_msTick >> 7 & 0x01) ) // 256 ms, update battery
+    		if (msTicks - prev_bat_sampling >= 250)
+    		{
+    			if(active_mode == ACTIVE_PS && bat >= 0)
+    			{
+    				pca9532_setLeds (0x0000,1<<bat--);
+    			}
+    			else if (active_mode == ACTIVE_FP && bat < 15)
+    			{
+    				pca9532_setLeds (1<<++bat,0x0000);
+    			}
+    			prev_bat_sampling = msTicks;
+    		}
+
+    		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
+    		if (active_mode == ACTIVE_NO && (msTicks - prev_sensor_sampling >= 4000) )
+    		{
+    			// light sensor
+    			sprintf (oled_string,"%3u",light_read()); 	// %6d (print as a decimal integer with a width of at least 6 wide)
+    												// %3.2f	(print as a floating point at least 3 wide and a precision of 2)
+    			oled_putString (40,10, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    			sprintf (oled_string,"%3.1f",temp_read()/10.0);
+    			oled_putString (40,20, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    	        acc_read(&x, &y, &z);
+    	        x = x+xoff;
+    	        y = y+yoff;
+    	        z = z+zoff;
+
+    			//printf("4 Sec has passed\n"); // update sensors HERE
+    			prev_sensor_sampling = msTicks;
+    		}
+
+
     	}
 
     }
@@ -490,10 +663,7 @@ int main (void) {
         /* ####### Accelerometer and LEDs  ###### */
         /* # */
 
-        acc_read(&x, &y, &z);
-        x = x+xoff;
-        y = y+yoff;
-        z = z+zoff;
+
 
         lux = light_read();
 

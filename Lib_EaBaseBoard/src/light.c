@@ -316,7 +316,10 @@ void light_setHiThreshold(uint32_t luxTh)
     uint8_t buf[2];
     uint32_t data = 0;
 
-    data = luxTh * width / range;
+    if (luxTh > range) // Ensure luxTh within range
+    	data = width - 1;
+    else
+    	data = luxTh * width / range;
 
     buf[0] = ADDR_IRQTH_HI;
     buf[1] = ((data >> 8) & 0xff);
