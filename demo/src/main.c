@@ -12,6 +12,7 @@
 #include "lpc17xx_i2c.h"
 #include "lpc17xx_ssp.h"
 #include "lpc17xx_timer.h"
+#include "lpc17xx_uart.h"
 
 #include "joystick.h"
 #include "pca9532.h"
@@ -36,6 +37,7 @@ static volatile uint8_t active_mode = ACTIVE_NO;
 static volatile int8_t bat = -1;
 
 static uint8_t barPos = 2;
+static uint8_t* msg = NULL;
 
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
 
@@ -411,6 +413,27 @@ static void init_GPIO(void)
 
 }
 
+static void init_uart()
+{
+	// PINSEL Configuration
+	PINSEL_CFG_Type PinCfg;
+	PinCfg.Funcnum = 2; // UART
+	PinCfg.Pinnum = 0;
+	PinCfg.Portnum = 0;
+	PINSEL_ConfigPin(&PinCfg); // TXD
+	PinCfg.Pinnum = 1;
+	PINSEL_ConfigPin(&PinCfg); // RXD
+
+	// UART Port Configuration
+	UART_CFG_Type uartCfg;
+	uartCfg.Baud_rate = 115200;
+	uartCfg.Databits = UART_DATABIT_8;
+	uartCfg.Parity = UART_PARITY_NONE;
+	uartCfg.Stopbits = UART_STOPBIT_1;
+	UART_Init(LPC_UART3, &uartCfg);
+	UART_TxCmd(LPC_UART3, ENABLE);
+}
+
 
 
 static void init_CAT()
@@ -541,6 +564,7 @@ int main (void) {
     init_i2c();
     init_ssp();
     init_GPIO();
+    init_uart();
 
     pca9532_init();
     joystick_init();
@@ -630,6 +654,8 @@ int main (void) {
     				pca9532_setLeds (1<<++bat,0x0000);
     			}
     			prev_bat_sampling = msTicks;
+    			msg = "Today is 2016 April 08th :) \r\n";
+    			UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
     		}
 
     		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
