@@ -31,6 +31,13 @@
 #define ACTIVE_NO		1
 #define ACTIVE_FP		2
 
+#define SENSOR_SAMPLING_TIME 4000
+#define INDICATOR_TIME_UNIT 250
+
+#define PORT_LIGHT_INT 	1
+#define PIN_LIGHT_INT	5
+
+
 static volatile uint8_t master_mode = MODE_NONE;
 static volatile uint8_t prev_mode = MODE_NONE;
 static volatile uint8_t active_mode = ACTIVE_NO;
@@ -49,12 +56,14 @@ uint8_t getSW4() // active low
 
 uint8_t Timer_with_StateCheck (uint32_t time, volatile uint8_t *state, volatile uint8_t *prev_state)
 {
-	uint32_t i;
-	for (i=0;i<time;i++)
+	uint32_t time0 = msTicks;
+
+	while (1)
 	{
-		Timer0_Wait(1);
 		if (*state != *prev_state)
 			return 1;
+		if (msTicks - time0 == time)
+			return 0;
 	}
 	return 0;
 }
@@ -71,17 +80,17 @@ void SysTick_Handler(void) {
 
 	msTicks++;
 
-	if (!blocking && getSW4() == 0) // active low
-		debounce_tick++;
-	else
-		debounce_tick = 0;
-
-	if (blocking && getSW4() == 1 )
-		blocking = 0;
-
-	if (debounce_tick >= 10)
+	if (getSW4()) // switch is de-pressed
 	{
-		debounce_tick = 0;
+		blocking = 0;
+		return;
+	}
+
+	if (blocking) // active low
+		return;
+
+	if (debounce_tick++ >= 10) // at this line, switch is pressed
+	{
 		blocking = 1;
 
 		switch (master_mode)
@@ -487,9 +496,21 @@ static void mode_CAT()
 	Timer_SW4(1500);
 	oled_command(0x2E); //stop scrolling
 
-	rgb_setLeds (RGB_BLUE);
-	if (Timer_SW4(4000)) return;
-	rgb_setLeds (RGB_RED);
+	for (i=0;i<4;i++) // 4 second of blink
+	{
+		rgb_setLeds (RGB_BLUE);
+		if (Timer_SW4(500)) return;
+		rgb_setLeds (0);
+		if (Timer_SW4(500)) return;
+	}
+
+	for (i=0;i<4;i++)
+	{
+		rgb_setLeds (RGB_RED);
+		if (Timer_SW4(500)) return;
+		rgb_setLeds (0);
+		if (Timer_SW4(500)) return;
+	}
 	if (Timer_SW4(4000)) return;
 
 	for(i=0;i<6;i++)
@@ -611,7 +632,7 @@ int main (void) {
 
     /* set light sensor interrupt */
     NVIC_SetPriorityGrouping(5);
-    GPIO_SetDir(2, 1<<5, 0); // 0: Input
+    GPIO_SetDir(2, PORT_LIGHT_INT<<PIN_LIGHT_INT, 0); // 0: Input
     // init light sensor interrupt related reg
 
     light_setIrqInCycles(LIGHT_CYCLE_4);
@@ -643,7 +664,7 @@ int main (void) {
     	{
 
     		//if ((msTicks >> 7 & 0x01) && !(prev_msTick >> 7 & 0x01) ) // 256 ms, update battery
-    		if (msTicks - prev_bat_sampling >= 250)
+    		if (msTicks - prev_bat_sampling >= INDICATOR_TIME_UNIT)
     		{
     			if(active_mode == ACTIVE_PS && bat >= 0)
     			{
@@ -654,12 +675,14 @@ int main (void) {
     				pca9532_setLeds (1<<++bat,0x0000);
     			}
     			prev_bat_sampling = msTicks;
+
     			msg = "Today is 2016 April 08th :) \r\n";
     			UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+
     		}
 
     		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
-    		if (active_mode == ACTIVE_NO && (msTicks - prev_sensor_sampling >= 4000) )
+    		if (active_mode == ACTIVE_NO && (msTicks - prev_sensor_sampling >= SENSOR_SAMPLING_TIME) )
     		{
     			// light sensor
     			sprintf (oled_string,"%3u",light_read()); 	// %6d (print as a decimal integer with a width of at least 6 wide)
