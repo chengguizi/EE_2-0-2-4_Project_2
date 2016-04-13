@@ -1,5 +1,5 @@
 /*****************************************************************************
- *   temp.c:  Driver for the Temp Sensor
+ *   temp.c:  Driver for the Temp Sensor 6576 - period
  *
  *   Copyright(C) 2009, Embedded Artists AB
  *   All rights reserved.
@@ -17,6 +17,7 @@
 
 #include "lpc17xx_gpio.h"
 #include "temp.h"
+#include "system_LPC17xx.h" // load system clock constant parameter: SystemCoreClock
 
 /******************************************************************************
  * Defines and typedefs
@@ -70,6 +71,9 @@
 
 static uint32_t (*getTicks)(void) = NULL;
 
+volatile uint32_t* SYSTICK_LOAD = 0xE000E014;
+volatile uint32_t* SYSTICK_VAL = 0xE000E018;
+
 /******************************************************************************
  * Local Functions
  *****************************************************************************/
@@ -88,6 +92,8 @@ static uint32_t (*getTicks)(void) = NULL;
  *                     in milliseconds
  *
  *****************************************************************************/
+
+
 void temp_init (uint32_t (*getMsTicks)(void))
 {
 #ifdef TEMP_USE_P0_6
@@ -96,6 +102,46 @@ void temp_init (uint32_t (*getMsTicks)(void))
     GPIO_SetDir( 0, (1<<2), 0 );
 #endif
     getTicks = getMsTicks;
+}
+
+int32_t temp_service ()
+{
+	//uint8_t state = GET_TEMP_STATE;
+	static uint32_t time0 = 0xFFFFFFFF;
+	static uint32_t total = 0;
+	static uint8_t count = 0;
+
+	uint32_t time1, time_delta;
+
+	if (time0 == 0xFFFFFFFF)
+	{
+		count = 0;
+		total = 0;
+		time0 = *SYSTICK_VAL & 0x00FFFFFF;
+		return -300;
+	}
+
+		time1 = *SYSTICK_VAL & 0x00FFFFFF;
+
+		if(time1 <= time0)
+			time_delta = time0 - time1; // systicks is COUNTING DOWN
+		else
+			time_delta = time0 + (*SYSTICK_LOAD - time1 + 1);
+
+		time0 = time1; // ready for next peroid calculation
+
+		count++;
+		total += time_delta;
+
+		//return time_delta;
+		if (count<100)
+			return -300;
+		else
+		{
+			time0 = 0xFFFFFFFF;
+			return ( (total/100) / 100 - 2731 ); // EVERY 100 system clock is 1us
+		}
+
 }
 
 /******************************************************************************

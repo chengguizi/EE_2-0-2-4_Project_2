@@ -11,6 +11,7 @@
 
 void temp_init (uint32_t (*getMsTick)(void));
 int32_t temp_read(void);
+int32_t temp_service (void);
 
 
 #endif /* end __TEMP_H */

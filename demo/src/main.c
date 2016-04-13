@@ -73,12 +73,12 @@ uint8_t Timer_SW4(uint32_t time)
 	return Timer_with_StateCheck(time, &master_mode, &prev_mode);
 }
 
-void SysTick_Handler(void) {
+void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 
 	static uint8_t debounce_tick = 0;
 	static uint8_t blocking = 0;
 
-	msTicks++;
+	msTicks = msTicks + 5;
 
 	if (getSW4()) // switch is de-pressed
 	{
@@ -89,7 +89,9 @@ void SysTick_Handler(void) {
 	if (blocking) // active low
 		return;
 
-	if (debounce_tick++ >= 10) // at this line, switch is pressed
+	debounce_tick++;
+
+	if (debounce_tick >= 200)
 	{
 		blocking = 1;
 
@@ -144,15 +146,13 @@ void set_active_mod (uint32_t lux)
 
 void EINT3_IRQHandler(void)
 {
-	uint32_t lux = light_read();
-	if (LPC_GPIOINT->IO2IntStatF >> 5 & 0x1)
+	if (LPC_GPIOINT->IO0IntStatR >> PIN_TEMP_INT & 0x01) // Interrupt PIN for Temperature Sensor
 	{
-		set_active_mod(lux);
-
-		light_clearIrqStatus();
-		LPC_GPIOINT->IO2IntClr = 1 << 5; // Port2.5, light sensor
+		LPC_GPIOINT->IO0IntClr = 1 << PIN_TEMP_INT; // Port0.2, PIO1_5, temp sensor
+		int32_t temp = temp_service();
+		if (temp> -300)
+			temperature = temp;
 	}
-
 	NVIC_ClearPendingIRQ(EINT3_IRQn);
 }
 
@@ -622,7 +622,8 @@ int main (void) {
     /* <---- Speaker ------ */
 
     /* System Clock */
-    SysTick_Config(SystemCoreClock / 1000); // Configure the SysTick interrupt to occur every 1ms
+    SysTick_Config(SystemCoreClock / 1000 * 5); // Configure the SysTick interrupt to occur every 1ms
+    // CHANGE TO 5 MS
     // By Default SysTick is disabled
 
     /* Temperature Sensor */
