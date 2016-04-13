@@ -43,13 +43,15 @@ static volatile uint8_t prev_mode = MODE_NONE;
 static volatile uint8_t active_mode = ACTIVE_NO;
 static volatile int8_t bat = -1;
 
+static volatile uint8_t fun_mode = 0;
+static volatile uint8_t prev_fun_mode = 0;
 static uint8_t barPos = 2;
 static uint8_t* msg = NULL;
 
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
 
 
-uint8_t getSW4() // active low
+inline uint8_t getSW4() // active low
 {
 	return (GPIO_ReadValue(1) >> 31 & 0x01);
 }
@@ -82,6 +84,23 @@ void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 
 	if (getSW4()) // switch is de-pressed
 	{
+		if(debounce_tick >= 2 && !blocking) // Condition that satisfy short press
+		{
+			switch (master_mode)
+				{
+				case MODE_NONE:
+					master_mode = MODE_CAT;
+					break;
+				case MODE_CAT:
+					master_mode = MODE_ACTIVE;
+					break;
+				case MODE_ACTIVE:
+					master_mode = MODE_CAT;
+					break;
+				}
+		}
+
+		debounce_tick = 0;
 		blocking = 0;
 		return;
 	}
@@ -93,22 +112,11 @@ void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 
 	if (debounce_tick >= 200)
 	{
+		fun_mode = !fun_mode;
 		blocking = 1;
-
-		switch (master_mode)
-		{
-		case MODE_NONE:
-			master_mode = MODE_CAT;
-			break;
-		case MODE_CAT:
-			master_mode = MODE_ACTIVE;
-			break;
-		case MODE_ACTIVE:
-			master_mode = MODE_CAT;
-			break;
-		}
 	}
 
+	return;
 
 }
 
@@ -475,6 +483,7 @@ static void mode_CAT()
 {
 	uint8_t i;
 
+	fun_mode = 0;
 	NVIC_DisableIRQ(EINT3_IRQn);
 	printf("====YOU JUST ENTER CAT MODE====\n");
 	init_CAT();
@@ -547,6 +556,32 @@ static void mode_ACTIVE ()
     NVIC_EnableIRQ(EINT3_IRQn);
 
 
+inline void Update_FunMode()
+{
+
+	if (fun_mode != prev_fun_mode)
+	{
+		prev_fun_mode = fun_mode;
+
+		if (!fun_mode)
+			oled_rect(0,0,OLED_DISPLAY_WIDTH-1,OLED_DISPLAY_HEIGHT-1,OLED_COLOR_BLACK);
+
+	}
+
+	if (fun_mode)
+	{
+
+		if (fun_mode == 1)
+		{
+			oled_rect(0,0,OLED_DISPLAY_WIDTH-1,OLED_DISPLAY_HEIGHT-1,OLED_COLOR_WHITE);
+		}
+		else if (fun_mode == 4)
+		{
+			oled_rect(0,0,OLED_DISPLAY_WIDTH-1,OLED_DISPLAY_HEIGHT-1,OLED_COLOR_BLACK);
+		}
+		fun_mode = (fun_mode==6) ? 1 : (fun_mode + 1);
+	}
+}
 	//uint32_t lux = light_read();
 
 	printf("====YOU JUST ENTER ACTIVE MODE====,bat=%d\n",bat);
@@ -647,9 +682,11 @@ int main (void) {
 
 	uint32_t prev_bat_sampling = 0;
 	uint32_t prev_sensor_sampling = 0;
+	uint32_t sampling_rate = SENSOR_SAMPLING_TIME;
 
     while (1)
     {
+
     	if (master_mode != prev_mode)
     	{
     		prev_mode = master_mode;
@@ -679,9 +716,11 @@ int main (void) {
 
     			msg = "Today is 2016 April 08th :) \r\n";
     			UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+    			Update_FunMode();
 
     		}
 
+    		sampling_rate = (fun_mode && active_mode == ACTIVE_FP) ? (SENSOR_SAMPLING_TIME / 4) : SENSOR_SAMPLING_TIME;
     		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
     		if (active_mode == ACTIVE_NO && (msTicks - prev_sensor_sampling >= SENSOR_SAMPLING_TIME) )
     		{
