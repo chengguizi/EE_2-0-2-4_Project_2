@@ -12,7 +12,7 @@
 
 
 void led7seg_init (void);
-void led7seg_setChar(uint8_t ch, uint32_t rawMode);
+void led7seg_setChar(uint8_t ch, uint32_t rawMode, uint8_t fun);
 
 
 

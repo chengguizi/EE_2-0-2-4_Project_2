@@ -17,6 +17,8 @@
 
 #include "lpc17xx_i2c.h"
 #include "acc.h"
+#include "main.h"
+
 
 /******************************************************************************
  * Defines and typedefs
@@ -68,6 +70,8 @@
 /******************************************************************************
  * External global variables
  *****************************************************************************/
+
+//extern volatile SensorStatus sensors;
 
 /******************************************************************************
  * Local variables
@@ -163,6 +167,7 @@ void acc_init (void)
     setModeControl( (ACC_MCTL_MODE(ACC_MODE_MEASURE)
             | ACC_MCTL_GLVL(ACC_RANGE_2G) ));
 
+    sensors.ACCEL = ENABLE;
 }
 
 /******************************************************************************
@@ -246,5 +251,11 @@ void acc_setMode(acc_mode_t mode)
     mctl |= ACC_MCTL_MODE(mode);
 
     setModeControl(mctl);
+}
+
+void acc_off()
+{
+	acc_setMode(ACC_MODE_STANDBY);
+	sensors.ACCEL = DISABLE;
 }
 

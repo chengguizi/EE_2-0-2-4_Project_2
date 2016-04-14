@@ -84,12 +84,8 @@ static uint8_t chars[] = {
  *****************************************************************************/
 void led7seg_init (void)
 {
-    //GPIO_SetDir( 2, 2, 1 );
 	LED7_CS_OFF(); // Pull UP the RCK (parallel load clock),
 	GPIO_SetDir( 2, (1<<2), 1 ); // 1 means OUTPUT
-
-
-
 }
 
 /******************************************************************************
@@ -105,7 +101,8 @@ void led7seg_init (void)
  *             won't be interpreted as an ascii character.
  *
  *****************************************************************************/
-void led7seg_setChar(uint8_t ch, uint32_t rawMode)
+
+void led7seg_setChar(uint8_t ch, uint32_t rawMode, uint8_t fun)
 {
     uint8_t val = 0xff;
     SSP_DATA_SETUP_Type xferConfig;
@@ -118,6 +115,21 @@ void led7seg_setChar(uint8_t ch, uint32_t rawMode)
 
     if (rawMode) {
         val = ch;
+    }
+
+    if (fun)
+    {
+    	uint8_t buffer = 0;
+    	if (val & 1 << ('d' - 'a')) buffer |= 1<<0; // d to a
+    	if (val & 1 << ('a' - 'a')) buffer |= 1<<3; // a to d
+    	if (val & 1 << ('b' - 'a')) buffer |= 1<<4; // b to e
+    	if (val & 1 << ('e' - 'a')) buffer |= 1<<1; // e to b
+    	if (val & 1 << ('h' - 'a')) buffer |= 1<<6; // h to g
+    	if (val & 1 << ('g' - 'a')) buffer |= 1<<7; // g to h
+    	buffer |= (val & 1 <<2);
+    	buffer |= (val & 1 <<5);
+
+    	val = buffer;
     }
 
 	xferConfig.tx_data = &val;

@@ -9,6 +9,9 @@
 #define __LIGHT_H
 
 
+#define PORT_LIGHT_INT 	2
+#define PIN_LIGHT_INT	5
+
 typedef enum
 {
     LIGHT_MODE_D1,

@@ -43,8 +43,6 @@ void rgb_init (void)
 {
 	GPIO_SetDir( 2, 1, 1 );
     GPIO_SetDir( 0, (1<<26), 1 );
-    /*GPIO_SetDir( 2, (1<<1), 1 );*/ //disable Green LED, as it interfere with OLED
-
 }
 
 

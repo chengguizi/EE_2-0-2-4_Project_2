@@ -2,7 +2,78 @@
 #include "joystick.h"
 #include "oled.h"
 
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
 
+
+typedef struct StringNode{
+	uint8_t data[UART_TX_BUFFER_SIZE +1];
+	struct StringNode *next;
+}StringNode_t;
+
+StringNode_t *node_front = NULL;
+StringNode_t *node_rear  = NULL;
+
+uint8_t hal_haveBuffer()
+{
+	return (node_front != NULL);
+}
+
+void push_String(uint8_t *stringin)
+{
+	StringNode_t *temp = (StringNode_t*) malloc(sizeof(StringNode_t));
+	strcpy(temp->data,stringin);
+	temp->next = NULL;
+
+	if (node_front == NULL && node_rear == NULL)
+	{
+		node_front = node_rear = temp;
+		return;
+	}
+
+	node_rear->next = temp;
+	node_rear = temp;
+}
+
+void pop_String(uint8_t *bufferout)
+{
+	StringNode_t *temp = node_front;
+
+
+	if( node_front ==  NULL)
+	{
+		bufferout = NULL;
+		return;
+	}
+
+
+	if (node_front == node_rear)
+		node_front = node_rear = NULL;
+	else
+		node_front = node_front->next;
+
+	strcpy(bufferout,temp->data);
+
+	free(temp);
+
+}
+
+
+
+uint8_t Timer_with_StateCheck (uint32_t time, volatile uint8_t *state, uint8_t *prev_state)
+{
+	uint32_t time0 = msTicks;
+
+	while (1)
+	{
+		if (*state != *prev_state)
+			return 1;
+		if (msTicks - time0 >= time)
+			return 0;
+	}
+	return 0;
+}
 
 void init_ssp(void)
 {
@@ -60,6 +131,9 @@ void init_i2c(void)
 	I2C_Cmd(LPC_I2C2, ENABLE);
 }
 
+/********************
+ *  SW4 & Bootload
+ *********************/
 void init_GPIO(void)
 {
 	// Initialize button
@@ -72,7 +146,7 @@ void init_GPIO(void)
 	PinCfg.Pinnum = 31;
 	PINSEL_ConfigPin(&PinCfg);
 
-	GPIO_SetDir(1, 1<<31, 0);
+	GPIO_SetDir(1, 1<<31, 0); // Enable SW4, PIO1_4
 
 	PinCfg.Funcnum = 0; // gpio
 	PinCfg.OpenDrain = 0;
@@ -81,7 +155,7 @@ void init_GPIO(void)
 	PinCfg.Pinnum = 4;
 	PINSEL_ConfigPin(&PinCfg);
 
-	GPIO_SetDir(0, 1<<4, 0); // input
+	GPIO_SetDir(0, 1<<4, 0); // input, bootload enable
 
 }
 
@@ -114,11 +188,23 @@ void init_uart()
 
 	UART_FIFOConfig(LPC_UART3,&fifoCfg);
 
-	UART_IntConfig(LPC_UART3,UART_INTCFG_RBR,ENABLE);
 
-	NVIC_EnableIRQ(UART3_IRQn);
+}
 
+void interrupt_init()
+{
+    /* System Clock */
+	SysTick_Config(SystemCoreClock / 1000 * 5); // Configure the SysTick interrupt to occur every 1ms
+	// CHANGE TO 5 MS
+	// By Default SysTick is disabled
 
+    NVIC_SetPriorityGrouping(5);
+    NVIC_SetPriority(EINT3_IRQn,0b00001 <<3); //Highest Priority
+    NVIC_SetPriority(SysTick_IRQn,0b00010 <<3);
+
+    /* set temperature sensor interrupt*/
+    GPIO_SetDir(0, 1<<PIN_TEMP_INT, 0); // 0: Input
+    LPC_GPIOINT->IO0IntEnR |= 1<<PIN_TEMP_INT; //Port0.2, temp sensor
 }
 
 

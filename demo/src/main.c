@@ -6,6 +6,7 @@
  *
  ******************************************************************************/
 #include <stdio.h>
+#include <string.h>
 
 #include "lpc17xx_pinsel.h"
 #include "lpc17xx_gpio.h"
@@ -24,26 +25,11 @@
 
 #include "led7seg.h"
 #include "HAL.h"
+#include "main.h"
 
-#define MODE_CAT 		1
-#define MODE_ACTIVE 	2
-#define MODE_NONE		0
-#define ACTIVE_PS		0
-#define ACTIVE_NO		1
-#define ACTIVE_FP		2
-
-#define SENSOR_SAMPLING_TIME 4000
-#define INDICATOR_TIME_UNIT 250
-
-#define FIRST_LINE		3
-#define SECOND_LINE		14
-#define THIRD_LINE		25
-#define FOURTH_LINE		36
-#define FIFTH_LINE		47
-#define SIXTH_LINE		58
-static volatile uint8_t master_mode = MODE_NONE; // Updated by Systick_Handler
-static uint8_t prev_mode = MODE_NONE;
-static uint8_t active_mode = ACTIVE_NO;
+volatile uint8_t master_mode = MODE_NONE; // Updated by Systick_Handler
+uint8_t prev_mode = MODE_NONE;
+uint8_t active_mode = ACTIVE_PS;
 static int8_t bat = -1;
 
 static volatile uint8_t fun_mode = 0; // Updated by Systick_Handler
@@ -51,45 +37,37 @@ static uint8_t prev_fun_mode = 0;
 
 static uint8_t msg[200] = {};
 static uint8_t oled_string[17] = {}; //#define OLED_DISPLAY_WIDTH  96, maximum 16 character
+static uint8_t uartBuffer[UART_RX_BUFFER_SIZE + 1];
 
-volatile int32_t temperature = -300;
-uint32_t lux = 0;
-int8_t x = 0;
-int8_t y = 0;
-int8_t z = 0;
+/*******************************************************************
+ *
+ * Sensor Data Storage
+ *
+ ******************************************************************/
+volatile SensorStatus sensors = {ENABLE,ENABLE,ENABLE,DISABLE};
+
+static volatile int32_t temperature = -300;
+static volatile int32_t prev_temperature = -300; // simulate second temp sensor
+
+static uint32_t lux = 0;
+
+static int8_t x = 0;
+static int8_t y = 0;
+static int8_t z = 0;
+static int32_t xoff = 0;
+static int32_t yoff = 0;
+static int32_t zoff = 0;
 
 static volatile uint8_t do_update = 0;
 
+
+/************************************************************
+ *
+ * System Clock Interrupt: Switch Deouncing and Mode Switch / 200Hz
+ *
+ ************************************************************/
+
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
-
-inline uint8_t GetLightInterrupt()
-{
-	return (~GPIO_ReadValue(PORT_LIGHT_INT)>> PIN_LIGHT_INT) & 0x00000001; // Manual light int read
-}
-
-inline uint8_t getSW4() // active low
-{
-	return (GPIO_ReadValue(1) >> 31 & 0x01);
-}
-
-uint8_t Timer_with_StateCheck (uint32_t time, volatile uint8_t *state, volatile uint8_t *prev_state)
-{
-	uint32_t time0 = msTicks;
-
-	while (1)
-	{
-		if (*state != *prev_state)
-			return 1;
-		if (msTicks - time0 == time)
-			return 0;
-	}
-	return 0;
-}
-
-uint8_t Timer_SW4(uint32_t time)
-{
-	return Timer_with_StateCheck(time, &master_mode, &prev_mode);
-}
 
 void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 
@@ -124,16 +102,13 @@ void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 	if (blocking) // active low
 		return;
 
-	debounce_tick++;
-
-	if (debounce_tick >= 200)
+	if (debounce_tick++ >= 200)
 	{
 		fun_mode = !fun_mode;
 		blocking = 1;
 	}
 
 	return;
-
 }
 
 void set_active_mod ()// assume lux is already be updated
@@ -144,20 +119,29 @@ void set_active_mod ()// assume lux is already be updated
 				light_setLoThreshold(0);
 				active_mode = ACTIVE_PS;
 				oled_putString (57,FIRST_LINE, "PS",OLED_COLOR_BLACK , OLED_COLOR_WHITE );
+				oled_putString (40,SECOND_LINE, " PS   ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (35,THIRD_LINE, " PS   PS  ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (3,FIFTH_LINE, "   PS   PS   PS ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
-				oled_putString (40,SECOND_LINE, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-				oled_putString (35,THIRD_LINE, "PS    PS  ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-				oled_putString (3,FIFTH_LINE, "  PS   PS   PS  ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				offUART(); // Disable UART in PS Mode
+				offSensors(1); // Sensors Idle, preserve light sensor
 				return;
-
 			}
-			else if (lux > 900)
+
+			if (active_mode == ACTIVE_PS)
+				onSensors(1);
+
+			if (lux > 900)
 			{
 				light_setHiThreshold(1000);
 				light_setLoThreshold(901);
 				do_update = 1;
 				active_mode = ACTIVE_FP;
 				oled_putString (57,FIRST_LINE, "FP", OLED_COLOR_BLACK, OLED_COLOR_WHITE );
+
+				// Enable UART in FP Mode
+				onUART();
+
 			}
 			else
 			{
@@ -166,66 +150,131 @@ void set_active_mod ()// assume lux is already be updated
 				active_mode = ACTIVE_NO;
 				do_update = 1;
 				oled_putString (57,FIRST_LINE, "NO", OLED_COLOR_BLACK, OLED_COLOR_WHITE );
+
+				// Disable UART in FP Mode
+				offUART();
 			}
 
-			oled_putString (3,FIFTH_LINE, "                      ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+			oled_putString (3,FIFTH_LINE, "                ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
 }
 
-void EINT3_IRQHandler(void)
+void EINT3_IRQHandler(void) // Triggered roughly every 3 ms
 {
 	if (LPC_GPIOINT->IO0IntStatR >> PIN_TEMP_INT & 0x01) // Interrupt PIN for Temperature Sensor
 	{
 		LPC_GPIOINT->IO0IntClr = 1 << PIN_TEMP_INT; // Port0.2, PIO1_5, temp sensor
 		int32_t temp = temp_service();
 		if (temp> -300)
+		{
+			prev_temperature = temperature;
 			temperature = temp;
+		}
+
 	}
 	NVIC_ClearPendingIRQ(EINT3_IRQn);
 }
 
 void UART3_IRQHandler(void)
 {
+	static uint8_t msg[200] = {};
+
+	static uint8_t pointer = 0;
+	uint8_t char_buffer;
 	uint32_t intsrc = LPC_UART3->IIR & UART_IIR_INTID_MASK;
 
-	if (intsrc == UART_IIR_INTID_RDA) // depends on trigger level, FCR[7:6]
+	// Receive Data Available or Character time-out
+	if (intsrc == UART_IIR_INTID_RDA || intsrc == UART_IIR_INTID_CTI) // depends on trigger level, FCR[7:6]
 	{
 		//LPC_UART3->LSR;
-		UART_SendData(LPC_UART3,UART_ReceiveData(LPC_UART3));
+		//UART_SendData(LPC_UART3,UART_ReceiveData(LPC_UART3));
+		char_buffer = UART_ReceiveData(LPC_UART3);
+
+		if (char_buffer != '\n')
+		{
+			uartBuffer[pointer++] = char_buffer;
+		}
+		else
+		{
+			uartBuffer[pointer] = 0;
+
+			if (strcmp(uartBuffer,"sensors") == 0)
+			{
+				push_String("success!");
+			}
+
+		}
 	}
 
-
-
 }
 
-uint32_t getMsTick(void)
+void uartService()
 {
-	return msTicks;
+	//offUART();
+
+	if (hal_haveBuffer())
+	{
+		uint8_t temp[UART_TX_BUFFER_SIZE+1];
+		pop_String(temp);
+		UART_Send(LPC_UART3, temp, strlen(temp), BLOCKING);
+	}
+
+    //onUART();
 }
 
+//uint32_t getMsTick(void)
+//{
+//	return msTicks;
+//}
 
-
-
+/******************************
+ *
+ * All indicator off
+ * All Sensors & UART off
+ *
+ ******************************/
 static void init_CAT()
 {
-	bat = -1;
-    led7seg_setChar (0xFF,1); // Raw mode, clear the Display
-	oled_clearScreen(OLED_COLOR_BLACK); // OFF THE DISPLAY
-	pca9532_setLeds (0x0000,0xFFFF); // Turn off all LEDs
-	rgb_setLeds (0);
-	// SCAN TURN OFF
+	oled_off (); // display OFF
+	bat = -1;		// reset battery level
+    led7seg_setChar (0xFF,1,0); // Raw mode, clear the Display
+	oled_clearScreen(OLED_COLOR_BLACK); // Clear OLED DISPLAY
+	pca9532_setLeds (0x0000,0xFFFF); // Turn off all row LEDs
+	rgb_setLeds (0);			// off Multicolor LED
+	active_mode = ACTIVE_PS; // Make Sure, light sensor is turned on properly
 
+	offSensors(0);
+	offUART(); 	// off Scan Mode
 }
 
-static void init_pre_CAT()
+/***************************
+ *  This should only be run ONCE
+ ****************************/
+static inline void onetime_init()
 {
+    init_i2c();
+    init_ssp();
+    init_GPIO();
+
+    pca9532_init(); // LED array
+    joystick_init();
+    oled_init();
+    rgb_init ();
+    led7seg_init();
+    light_init();
+
+    interrupt_init();
+
 	init_CAT();
 }
 
+
 static void welcome_screen()
 {
-	if (Timer_SW4(100)) return;
 	oled_on();
+	oled_gpu_scroll(); // Create Animation
+	oled_putString (26,3, "I-WATCH", OLED_COLOR_BLACK , OLED_COLOR_WHITE );
+	if (Timer_SW4(200)) return;
 	oled_putString (26,3, "I-WATCH", OLED_COLOR_BLACK , OLED_COLOR_WHITE );
 	if (Timer_SW4(200)) return;
 	oled_putString (6,15, "Electronic Tag", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
@@ -235,22 +284,31 @@ static void welcome_screen()
 	oled_putString (16,39, "and Testing", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 	if (Timer_SW4(200)) return;
 	oled_putString (38,51, "Mode", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	//if (Timer_SW4(500)) return;
+
+	oled_command(0x2E); //stop scrolling
 }
 
-static void mode_CAT()
+/******************************************************
+ *
+ * Read Accel Offset, OFF Sensors and UART
+ * Turn On all the sensors at last
+ *
+ *******************************************************/
+static void mode_CAT(int32_t* xoff, int32_t* yoff, int32_t* zoff)
 {
 	uint8_t i;
 
-	fun_mode = 0;
-	NVIC_DisableIRQ(EINT3_IRQn);
+	init_CAT(); // Turn off Everything, including UART
 
-	oled_off (); // display OFF
-	init_CAT();
-	oled_gpu_scroll();
+	acc_init();
+
 	welcome_screen();
 
-	oled_command(0x2E); //stop scrolling
+	acc_read(&x, &y, &z);
+	*xoff = 0-x;
+	*yoff = 0-y;
+	*zoff = 64-z;
+	acc_off();
 
 	for (i=0;i<4;i++) // 4 second of blink
 	{
@@ -272,7 +330,7 @@ static void mode_CAT()
 
 	for(i=0;i<6;i++)
 	{
-		led7seg_setChar ('0'+i,0);
+		led7seg_setChar ('0'+i,0,fun_mode);
 		if (Timer_SW4(1000)) return;
 	}
 
@@ -284,7 +342,6 @@ static void mode_CAT()
 
 	oled_off (); // display OFF
 	oled_clearScreen(OLED_COLOR_BLACK);
-
 	oled_putString (03,FIRST_LINE, "     CAT   ", OLED_COLOR_BLACK, OLED_COLOR_WHITE);
 	oled_putString (03,SECOND_LINE, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 	oled_putString (03,THIRD_LINE, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
@@ -292,31 +349,29 @@ static void mode_CAT()
 	oled_rect(2,2,8*11,10,OLED_COLOR_WHITE);
 	oled_on ();
 
+	//onSensors(0);
 	return;
-
 }
 
 static void mode_ACTIVE ()
 {
+	onSensors(0);
+	oled_command(0x2E); //stop scrolling
+
 	if(bat>=0)
-		pca9532_setLeds (1<<bat,0x0000);
+		pca9532_setLeds (1<<bat,0x0000); // correct the difference from CAT mode
 
 	oled_off (); // display OFF
 	oled_clearScreen(OLED_COLOR_BLACK);
-
 	oled_putString (03,FIRST_LINE, "ACTIVE - ", OLED_COLOR_BLACK, OLED_COLOR_WHITE);
 	oled_putString (03,SECOND_LINE, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 	oled_putString (03,THIRD_LINE, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 	oled_putString (03,FOURTH_LINE, "Accel: (x,y,z)", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 	oled_rect(2,2,8*11,10,OLED_COLOR_WHITE);
-
-	light_clearIrqStatus();
-	NVIC_EnableIRQ(EINT3_IRQn);
+    oled_on();
 
     do_update = 1;
-    light_clearIrqStatus();
-    NVIC_EnableIRQ(EINT3_IRQn);
-
+}
 
 inline void Update_FunMode()
 {
@@ -347,25 +402,107 @@ inline void Update_FunMode()
 
 inline void Update_Screen ()
 {
-	sprintf (oled_string,"%3u",lux); 	// %6d (print as a decimal integer with a width of at least 6 wide)
+	sprintf (oled_string,"%3u ",lux); 	// %6d (print as a decimal integer with a width of at least 6 wide)
 										// %3.2f	(print as a floating point at least 3 wide and a precision of 2)
 	oled_putString (40,SECOND_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
-	sprintf (oled_string,"%3.1f",temperature/10.0);
+	sprintf (oled_string,"%3.1f ",prev_temperature/10.0);
 	oled_putString (35,THIRD_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	oled_putString (64,THIRD_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	sprintf (oled_string,"%3.1f ",temperature/10.0);
+	oled_putString (65,THIRD_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
-    sprintf (oled_string,"%5d",x);
+    sprintf (oled_string,"%5d ",x);
     oled_putString (3,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
-    sprintf (oled_string,"%5d",y);
-    oled_putString (32,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+    sprintf (oled_string,"%5d ",y);
+    oled_putString (27,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
-	sprintf (oled_string,"%5d",z);
-	oled_putString (62,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	sprintf (oled_string,"%5d ",z);
+	oled_putString (51,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 }
 
+void Update_Battery(uint32_t * prev_bat_sampling )
+{
+	if (msTicks - *prev_bat_sampling >= INDICATOR_TIME_UNIT)
+	{
+		if(active_mode == ACTIVE_PS && bat >= 0)
+		{
+			pca9532_setLeds (0x0000,1<<bat--);
+			if( bat==14)
+			{
+				sprintf(msg,"Satellite Communication Link Suspended.\r\n");
+				//UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+				push_String(msg);
+			}
+		}
+		else if (active_mode == ACTIVE_FP && bat < 15)
+		{
+			pca9532_setLeds (1<<++bat,0x0000);
+			if( bat==15)
+			{
+				sprintf(msg,"Satellite Communication Link Established.\r\n");
+				//UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+				push_String(msg);
+			}
 
+		}
+		Update_FunMode();
+		*prev_bat_sampling = msTicks;
+	}
+}
+
+Update_Light_Mode(uint32_t *prev_sensor_sampling, uint32_t sampling_rate)
+{
+	static uint32_t sampling_rate = SENSOR_SAMPLING_TIME;
+
+	sampling_rate = (fun_mode && active_mode == ACTIVE_FP) ? (SENSOR_SAMPLING_TIME / 6) : SENSOR_SAMPLING_TIME;
+
+	lux = light_read();
+	do_update |= GetLightInterrupt();
+
+	if (do_update)
+	{
+		set_active_mod();
+		light_clearIrqStatus();
+		if (active_mode == ACTIVE_PS)
+			do_update = 0;
+	}
+
+	if ( do_update || active_mode != ACTIVE_PS && (msTicks - *prev_sensor_sampling >= sampling_rate) )
+	{
+
+		if (fun_mode)rgb_setLeds (RGB_BLUE | RGB_RED);
+
+		acc_read(&x, &y, &z);
+		x = x+xoff;
+		y = y+yoff;
+		z = z+zoff;
+
+		Update_Screen();
+
+		/// UART
+		if(bat == 15)
+		{
+			sprintf (msg,"L%d_TA_%3.1f_TB%3.1f_AX%d_AY%d_AZ%d\n\r",lux,prev_temperature/10.0,temperature/10.0,x,y,z);
+			//UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+			push_String(msg);
+		}
+
+		rgb_setLeds (RGB_RED);
+		*prev_sensor_sampling = msTicks;
+		do_update = 0;
+
+	}
+}
+
+void Update_Light_Accel()
+{
+	lux = light_read();
+	acc_read(&x, &y, &z);
+	x = x+xoff;
+	y = y+yoff;
+	z = z+zoff;
+}
 
 ////////////////////////////////////////////
 //////// MAIN FUNCTION /////////////////////
@@ -373,32 +510,8 @@ inline void Update_Screen ()
 
 int main (void) {
 
-    int32_t xoff = 0;
-    int32_t yoff = 0;
-    int32_t zoff = 0;
-
-    init_i2c();
-    init_ssp();
-    init_GPIO();
-    init_uart();
-
-    pca9532_init();
-    joystick_init();
-    acc_init();
-    oled_init();
-    rgb_init ();
-
-    led7seg_init();
-
-    light_enable();
-
-    /*
-     * Assume base board in zero-g position when reading first value.
-     */
-    acc_read(&x, &y, &z);
-    xoff = 0-x;
-    yoff = 0-y;
-    zoff = 64-z;
+	uint32_t prev_bat_sampling = 0;
+	uint32_t prev_sensor_sampling = 0;
 
     /* ---- Speaker ------> */
 
@@ -416,124 +529,57 @@ int main (void) {
 
     /* <---- Speaker ------ */
 
-    /* System Clock */
-    SysTick_Config(SystemCoreClock / 1000 * 5); // Configure the SysTick interrupt to occur every 1ms
-    // CHANGE TO 5 MS
-    // By Default SysTick is disabled
+    onetime_init(); // one-time Initialization + CAT mode step 1
 
-    /* Temperature Sensor */
-    temp_init (&getMsTick);  //Initialize Temp Sensor driver
-
-    init_pre_CAT();
-
-    /* set light sensor interrupt */
-    NVIC_SetPriorityGrouping(5);
-    GPIO_SetDir(PORT_LIGHT_INT, 1<<PIN_LIGHT_INT, 0); // 0: Input
-    // init light sensor interrupt related reg
-
-    light_setIrqInCycles(LIGHT_CYCLE_4);
-
-    // Enable GPIO Interrupt at PIN
-
-
-
-    /*********/
-
-	uint32_t prev_bat_sampling = 0;
-	uint32_t prev_sensor_sampling = 0;
-	uint32_t sampling_rate = SENSOR_SAMPLING_TIME;
+    onUART();
+	push_String("before while loop, UART Message\r\n");
+	offUART();
 
     while (1)
     {
 
-    	if (master_mode != prev_mode)
-    	{
-    		prev_mode = master_mode;
+    	switch (master_mode){
+    	case MODE_NONE:
+    		break;
 
-    		if (master_mode == MODE_CAT)
-    			mode_CAT();
-    		else if (master_mode == MODE_ACTIVE)
-    			mode_ACTIVE();
-    	}
+    	case MODE_CAT:
 
-
-    	if(master_mode == MODE_ACTIVE)
-    	{
-
-    		//if ((msTicks >> 7 & 0x01) && !(prev_msTick >> 7 & 0x01) ) // 256 ms, update battery
-    		if (msTicks - prev_bat_sampling >= INDICATOR_TIME_UNIT)
+    		// ONE-Time Set-up for CAT Mode
+    		if(prev_mode != MODE_CAT)
     		{
-    			if(active_mode == ACTIVE_PS && bat >= 0)
-    			{
-    				pca9532_setLeds (0x0000,1<<bat--);
-    				if( bat==14)
-					{
-						sprintf(msg,"Satellite Communication Link Suspended.\r\n");
-						UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
-					}
-    			}
-    			else if (active_mode == ACTIVE_FP && bat < 15)
-    			{
-    				pca9532_setLeds (1<<++bat,0x0000);
-    				if( bat==15)
-    				{
-    					sprintf(msg,"Satellite Communication Link Established.\r\n");
-    					UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
-    				}
-
-    			}
-    			Update_FunMode();
-    			prev_bat_sampling = msTicks;
+    			prev_mode = MODE_CAT; // Must update first
+    			mode_CAT(&xoff,&yoff,&zoff); //BLOCKING MODULE
+    			onSensors(0); // Turn ON all sensors
+    			break;
     		}
-
-    		sampling_rate = (fun_mode && active_mode == ACTIVE_FP) ? (SENSOR_SAMPLING_TIME / 4) : SENSOR_SAMPLING_TIME;
-    		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
-
-
-    		lux = light_read();
-
-    		do_update |= GetLightInterrupt();
-
-			if (do_update)
-			{
-				set_active_mod();
-				light_clearIrqStatus();
-				if (active_mode == ACTIVE_PS)
-					do_update = 0;
-			}
-    		if ( do_update || active_mode != ACTIVE_PS && (msTicks - prev_sensor_sampling >= sampling_rate) )
-    		{
-
-    			rgb_setLeds (RGB_BLUE | RGB_RED);
-
-    			acc_read(&x, &y, &z);
-				x = x+xoff;
-				y = y+yoff;
-				z = z+zoff;
-
+				Update_Light_Accel();
 				Update_Screen();
+    		break;
+    	case MODE_ACTIVE:
 
-				/// UART
-				if(bat == 15)
-				{
-					sprintf (msg,"L%d_TA_%3.1f_TB%3.1f_AX%d_AY%d_AZ%d\n\r",lux,temperature/10.0,temperature/10.0,x,y,z);
-					UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
-				}
-    			rgb_setLeds (RGB_RED);
-    			prev_sensor_sampling = msTicks;
-    			do_update = 0;
+    		// ONE-TIME Set-up for ACTIVE MODE
+    		if(prev_mode != MODE_ACTIVE)
+    		{
+    			prev_mode = MODE_ACTIVE;
+    			mode_ACTIVE(); // trigger the first sensor update
+    			prev_sensor_sampling = prev_bat_sampling = msTicks;
+    			break;
     		}
 
+    		Update_Battery(&prev_bat_sampling);
+
+    		Update_Light_Mode(&prev_sensor_sampling, sampling_rate);
+    		break;
 
     	}
-
+    	uartService();
     }
 
-    while (1)
+/*    while (1)
     {
 
-        /* ####### Accelerometer and LEDs  ###### */
-        /* # */
+         ####### Accelerometer and LEDs  ######
+         #
 
 
 
@@ -562,24 +608,24 @@ int main (void) {
         }
 
 
-        /* # */
-        /* ############################################# */
+         #
+         #############################################
 
 
-        /* ####### Joystick and OLED  ###### */
-        /* # */
+         ####### Joystick and OLED  ######
+         #
 
         state = joystick_read();
         if (state != 0)
             drawOled(state);
 
-        /* # */
-        /* ############################################# */
+         #
+         #############################################
 
 
 
-        /* ############ Trimpot and RGB LED  ########### */
-        /* # */
+         ############ Trimpot and RGB LED  ###########
+         #
 
         btn1 = (GPIO_ReadValue(1) >> 31) & 0x01;
         btn2 = (GPIO_ReadValue(0) >> 4) & 0x01;
@@ -601,7 +647,7 @@ int main (void) {
 
 
         Timer0_Wait(1);
-    }
+    }*/
 
 
 }
@@ -611,7 +657,6 @@ void check_failed(uint8_t *file, uint32_t line)
 	/* User can add his own implementation to report the file name and line number,
 	 ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
 	printf("Wrong parameters value: file %s on line %d\r\n", file, line);
-
 	/* Infinite loop */
 	while(1);
 }

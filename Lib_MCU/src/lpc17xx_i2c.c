@@ -927,14 +927,15 @@ error:
 		// Setup tx_rx data, callback and interrupt handler
 		tmp = I2C_getNum(I2Cx);
 		i2cdat[tmp].txrx_setup = (uint32_t) TransferCfg;
-		i2cdat[tmp].inthandler = I2C_MasterHandler;
+		i2cdat[tmp].inthandler = I2C_MasterHandler; // How to use this interrupt handler??
 		// Set direction phase, write first
 		i2cdat[tmp].dir = 0;
 
 		/* First Start condition -------------------------------------------------------------- */
-		I2Cx->I2CONCLR = I2C_I2CONCLR_SIC;
-		I2Cx->I2CONSET = I2C_I2CONSET_STA;
-		I2C_IntCmd(I2Cx, 1);
+		I2Cx->I2CONCLR = I2C_I2CONCLR_SIC;	// Clear Interrupt
+		I2Cx->I2CONSET = I2C_I2CONSET_STA;  // START flag
+		I2C_IntCmd(I2Cx, 1);  	// Enable interrupt in NVIC
+								// either NVIC_Enabl2eIRQ(I2C0_IRQn)  or NVIC_EnableIRQ(I2C1_IRQn) or NVIC_EnableIRQ(I2C2_IRQn)
 
 		return (SUCCESS);
 	}

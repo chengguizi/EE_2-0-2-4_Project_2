@@ -17,6 +17,7 @@
 
 #include "lpc17xx_i2c.h"
 #include "light.h"
+#include "main.h"
 
 /******************************************************************************
  * Defines and typedefs
@@ -86,7 +87,7 @@ static int I2CRead(uint8_t addr, uint8_t* buf, uint32_t len)
 	rxsetup.rx_length = len;
 	rxsetup.retransmissions_max = 3;
 
-	if (I2C_MasterTransferData(I2CDEV, &rxsetup, I2C_TRANSFER_POLLING) == SUCCESS){
+	if (I2C_MasterTransferData(I2CDEV, &rxsetup, I2C_TRANSFER_POLLING) == SUCCESS){ //#define I2CDEV LPC_I2C2
 		return (0);
 	} else {
 		return (-1);
@@ -147,7 +148,9 @@ static uint8_t readControlReg(void)
  *****************************************************************************/
 void light_init (void)
 {
-    /* nothing to initialize. light_enable enables the sensor */
+	GPIO_SetDir(PORT_LIGHT_INT, 1<<PIN_LIGHT_INT, 0); // 0: Input
+	light_setIrqInCycles(LIGHT_CYCLE_4);
+	/* nothing to initialize. light_enable enables the sensor */
 }
 
 /******************************************************************************
@@ -165,6 +168,8 @@ void light_enable (void)
 
     range = RANGE_K1;
     width = WIDTH_16_VAL;
+
+    sensors.LIGHT = ENABLE;
 }
 
 /******************************************************************************
@@ -432,4 +437,6 @@ void light_shutdown(void)
     buf[0] = ADDR_CMD;
     buf[1] = cmd;
     I2CWrite(LIGHT_I2C_ADDR, buf, 2);
+
+    sensors.LIGHT = DISABLE;
 }

@@ -845,7 +845,7 @@ uint8_t oled_putChar(uint8_t x, uint8_t y, uint8_t ch, oled_color_t fb, oled_col
 
     oled_color_t color = OLED_COLOR_BLACK;
 
-    if((x >= (OLED_DISPLAY_WIDTH - 8)) || (y >= (OLED_DISPLAY_HEIGHT - 8)) )
+    if((x >= (OLED_DISPLAY_WIDTH - 6)) || (y >= (OLED_DISPLAY_HEIGHT - 8)) )
     {
         return 0;
     }
