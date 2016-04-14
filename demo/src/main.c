@@ -46,12 +46,12 @@ static uint8_t prev_mode = MODE_NONE;
 static uint8_t active_mode = ACTIVE_NO;
 static int8_t bat = -1;
 
+static volatile uint8_t fun_mode = 0; // Updated by Systick_Handler
+static uint8_t prev_fun_mode = 0;
 
 static uint8_t msg[200] = {};
 static uint8_t oled_string[17] = {}; //#define OLED_DISPLAY_WIDTH  96, maximum 16 character
 
-static volatile uint8_t fun_mode = 0;
-static volatile uint8_t prev_fun_mode = 0;
 volatile int32_t temperature = -300;
 uint32_t lux = 0;
 int8_t x = 0;
@@ -313,6 +313,7 @@ static void mode_ACTIVE ()
 	light_clearIrqStatus();
 	NVIC_EnableIRQ(EINT3_IRQn);
 
+    do_update = 1;
     light_clearIrqStatus();
     NVIC_EnableIRQ(EINT3_IRQn);
 
@@ -481,10 +482,8 @@ int main (void) {
     				}
 
     			}
-    			prev_bat_sampling = msTicks;
-
     			Update_FunMode();
-
+    			prev_bat_sampling = msTicks;
     		}
 
     		sampling_rate = (fun_mode && active_mode == ACTIVE_FP) ? (SENSOR_SAMPLING_TIME / 4) : SENSOR_SAMPLING_TIME;
