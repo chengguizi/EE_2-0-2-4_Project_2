@@ -35,17 +35,23 @@
 #define SENSOR_SAMPLING_TIME 4000
 #define INDICATOR_TIME_UNIT 250
 
+#define FIRST_LINE		3
+#define SECOND_LINE		14
+#define THIRD_LINE		25
+#define FOURTH_LINE		36
+#define FIFTH_LINE		47
+#define SIXTH_LINE		58
 static volatile uint8_t master_mode = MODE_NONE; // Updated by Systick_Handler
 static uint8_t prev_mode = MODE_NONE;
 static uint8_t active_mode = ACTIVE_NO;
 static int8_t bat = -1;
 
 
+static uint8_t msg[200] = {};
+static uint8_t oled_string[17] = {}; //#define OLED_DISPLAY_WIDTH  96, maximum 16 character
 
 static volatile uint8_t fun_mode = 0;
 static volatile uint8_t prev_fun_mode = 0;
-static uint8_t barPos = 2;
-static uint8_t* msg = NULL;
 volatile int32_t temperature = -300;
 uint32_t lux = 0;
 int8_t x = 0;
@@ -56,6 +62,10 @@ static volatile uint8_t do_update = 0;
 
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
 
+inline uint8_t GetLightInterrupt()
+{
+	return (~GPIO_ReadValue(PORT_LIGHT_INT)>> PIN_LIGHT_INT) & 0x00000001; // Manual light int read
+}
 
 inline uint8_t getSW4() // active low
 {
@@ -126,36 +136,40 @@ void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 
 }
 
-void set_active_mod (uint32_t lux)
+void set_active_mod ()// assume lux is already be updated
 {
 			if (lux < 50)
 			{
 				light_setHiThreshold(49);
 				light_setLoThreshold(0);
 				active_mode = ACTIVE_PS;
-				//printf("I'm in Active_PS=%d!\n",lux);
-				oled_putString (0,0, "ACTIVE - PS", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (57,FIRST_LINE, "PS",OLED_COLOR_BLACK , OLED_COLOR_WHITE );
 
-				oled_putString (40,10, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-				oled_putString (40,20, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (40,SECOND_LINE, "PS    ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (35,THIRD_LINE, "PS    PS  ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (3,FIFTH_LINE, "  PS   PS   PS  ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				return;
 
 			}
 			else if (lux > 900)
 			{
 				light_setHiThreshold(1000);
 				light_setLoThreshold(901);
+				do_update = 1;
 				active_mode = ACTIVE_FP;
-				//printf("I'm in Active_FP=%d!\n",lux);
-				oled_putString (0,0, "ACTIVE - FP", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				oled_putString (57,FIRST_LINE, "FP", OLED_COLOR_BLACK, OLED_COLOR_WHITE );
 			}
 			else
 			{
 				light_setHiThreshold(900);
 				light_setLoThreshold(50);
 				active_mode = ACTIVE_NO;
-				//printf("I'm in Active_NO=%d!\n",lux);
-				oled_putString (0,0, "ACTIVE - NO", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+				do_update = 1;
+				oled_putString (57,FIRST_LINE, "NO", OLED_COLOR_BLACK, OLED_COLOR_WHITE );
 			}
+
+			oled_putString (3,FIFTH_LINE, "                      ", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
 }
 
 void EINT3_IRQHandler(void)
@@ -203,7 +217,6 @@ static void init_CAT()
 
 }
 
-// QUESTION - Why use "static"
 static void init_pre_CAT()
 {
 	init_CAT();
@@ -211,11 +224,18 @@ static void init_pre_CAT()
 
 static void welcome_screen()
 {
-	oled_putString (25,1, "I-WATCH", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	oled_putString (3,13, "Electronic Tag", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	oled_putString (7,26, "Configuration", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	oled_putString (13,39, "and Testing", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	oled_putString (36,52, "Mode", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	if (Timer_SW4(100)) return;
+	oled_on();
+	oled_putString (26,3, "I-WATCH", OLED_COLOR_BLACK , OLED_COLOR_WHITE );
+	if (Timer_SW4(200)) return;
+	oled_putString (6,15, "Electronic Tag", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	if (Timer_SW4(200)) return;
+	oled_putString (9,27, "Configuration", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	if (Timer_SW4(200)) return;
+	oled_putString (16,39, "and Testing", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	if (Timer_SW4(200)) return;
+	oled_putString (38,51, "Mode", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	//if (Timer_SW4(500)) return;
 }
 
 static void mode_CAT()
@@ -224,24 +244,12 @@ static void mode_CAT()
 
 	fun_mode = 0;
 	NVIC_DisableIRQ(EINT3_IRQn);
-	printf("====YOU JUST ENTER CAT MODE====\n");
-	init_CAT();
-	oled_off (); // display OFF
-	oled_on();
-	oled_gpu_scroll();
 
+	oled_off (); // display OFF
+	init_CAT();
+	oled_gpu_scroll();
 	welcome_screen();
 
-	/*for (i=0;i<=0x40;i++)
-	{
-		oled_VRoll(0);
-		if (Timer_SW4(10)) return;
-	}*/
-
-	//oled_gpu_Hscroll();
-
-
-	Timer_SW4(1500);
 	oled_command(0x2E); //stop scrolling
 
 	for (i=0;i<4;i++) // 4 second of blink
@@ -259,7 +267,8 @@ static void mode_CAT()
 		rgb_setLeds (0);
 		if (Timer_SW4(500)) return;
 	}
-	if (Timer_SW4(4000)) return;
+
+	rgb_setLeds (RGB_RED); // Turn on forever
 
 	for(i=0;i<6;i++)
 	{
@@ -273,6 +282,16 @@ static void mode_CAT()
 		if (Timer_SW4(250)) return;
 	}
 
+	oled_off (); // display OFF
+	oled_clearScreen(OLED_COLOR_BLACK);
+
+	oled_putString (03,FIRST_LINE, "     CAT   ", OLED_COLOR_BLACK, OLED_COLOR_WHITE);
+	oled_putString (03,SECOND_LINE, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (03,THIRD_LINE, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (03,FOURTH_LINE, "Accel: (x,y,z)", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_rect(2,2,8*11,10,OLED_COLOR_WHITE);
+	oled_on ();
+
 	return;
 
 }
@@ -282,14 +301,17 @@ static void mode_ACTIVE ()
 	if(bat>=0)
 		pca9532_setLeds (1<<bat,0x0000);
 
+	oled_off (); // display OFF
 	oled_clearScreen(OLED_COLOR_BLACK);
-    //light_setHiThreshold(1000);
-    //light_setLoThreshold(1000);
 
-	set_active_mod( light_read() );
+	oled_putString (03,FIRST_LINE, "ACTIVE - ", OLED_COLOR_BLACK, OLED_COLOR_WHITE);
+	oled_putString (03,SECOND_LINE, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (03,THIRD_LINE, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (03,FOURTH_LINE, "Accel: (x,y,z)", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_rect(2,2,8*11,10,OLED_COLOR_WHITE);
 
-	oled_putString (00,10, "Light:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	oled_putString (00,20, "Temp:", OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	light_clearIrqStatus();
+	NVIC_EnableIRQ(EINT3_IRQn);
 
     light_clearIrqStatus();
     NVIC_EnableIRQ(EINT3_IRQn);
@@ -321,7 +343,6 @@ inline void Update_FunMode()
 		fun_mode = (fun_mode==6) ? 1 : (fun_mode + 1);
 	}
 }
-	//uint32_t lux = light_read();
 
 inline void Update_Screen ()
 {
@@ -341,7 +362,6 @@ inline void Update_Screen ()
 
 	sprintf (oled_string,"%5d",z);
 	oled_putString (62,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
-	printf("====YOU JUST ENTER ACTIVE MODE====,bat=%d\n",bat);
 }
 
 
@@ -355,24 +375,6 @@ int main (void) {
     int32_t xoff = 0;
     int32_t yoff = 0;
     int32_t zoff = 0;
-
-    uint32_t lux = 0;
-    int32_t T;
-
-    int8_t x = 0;
-
-    int8_t y = 0;
-    int8_t z = 0;
-    uint8_t dir = 1;
-    uint8_t wait = 0;
-
-    uint8_t state    = 0;
-
-    uint8_t btn1 = 1;
-    uint8_t btn2 = 1;
-
-    uint8_t oled_string[15] = {};
-
 
     init_i2c();
     init_ssp();
@@ -425,7 +427,7 @@ int main (void) {
 
     /* set light sensor interrupt */
     NVIC_SetPriorityGrouping(5);
-    GPIO_SetDir(2, PORT_LIGHT_INT<<PIN_LIGHT_INT, 0); // 0: Input
+    GPIO_SetDir(PORT_LIGHT_INT, 1<<PIN_LIGHT_INT, 0); // 0: Input
     // init light sensor interrupt related reg
 
     light_setIrqInCycles(LIGHT_CYCLE_4);
@@ -463,15 +465,24 @@ int main (void) {
     			if(active_mode == ACTIVE_PS && bat >= 0)
     			{
     				pca9532_setLeds (0x0000,1<<bat--);
+    				if( bat==14)
+					{
+						sprintf(msg,"Satellite Communication Link Suspended.\r\n");
+						UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+					}
     			}
     			else if (active_mode == ACTIVE_FP && bat < 15)
     			{
     				pca9532_setLeds (1<<++bat,0x0000);
+    				if( bat==15)
+    				{
+    					sprintf(msg,"Satellite Communication Link Established.\r\n");
+    					UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+    				}
+
     			}
     			prev_bat_sampling = msTicks;
 
-    			msg = "Today is 2016 April 08th :) \r\n";
-    			UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
     			Update_FunMode();
 
     		}
@@ -503,7 +514,12 @@ int main (void) {
 
 				Update_Screen();
 
-    			//printf("4 Sec has passed\n"); // update sensors HERE
+				/// UART
+				if(bat == 15)
+				{
+					sprintf (msg,"L%d_TA_%3.1f_TB%3.1f_AX%d_AY%d_AZ%d\n\r",lux,temperature/10.0,temperature/10.0,x,y,z);
+					UART_Send(LPC_UART3, msg, strlen(msg), BLOCKING);
+				}
     			rgb_setLeds (RGB_RED);
     			prev_sensor_sampling = msTicks;
     			do_update = 0;
@@ -595,6 +611,7 @@ void check_failed(uint8_t *file, uint32_t line)
 {
 	/* User can add his own implementation to report the file name and line number,
 	 ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+	printf("Wrong parameters value: file %s on line %d\r\n", file, line);
 
 	/* Infinite loop */
 	while(1);
