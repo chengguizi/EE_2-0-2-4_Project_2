@@ -35,17 +35,24 @@
 #define SENSOR_SAMPLING_TIME 4000
 #define INDICATOR_TIME_UNIT 250
 
+static volatile uint8_t master_mode = MODE_NONE; // Updated by Systick_Handler
+static uint8_t prev_mode = MODE_NONE;
+static uint8_t active_mode = ACTIVE_NO;
+static int8_t bat = -1;
 
 
-static volatile uint8_t master_mode = MODE_NONE;
-static volatile uint8_t prev_mode = MODE_NONE;
-static volatile uint8_t active_mode = ACTIVE_NO;
-static volatile int8_t bat = -1;
 
 static volatile uint8_t fun_mode = 0;
 static volatile uint8_t prev_fun_mode = 0;
 static uint8_t barPos = 2;
 static uint8_t* msg = NULL;
+volatile int32_t temperature = -300;
+uint32_t lux = 0;
+int8_t x = 0;
+int8_t y = 0;
+int8_t z = 0;
+
+static volatile uint8_t do_update = 0;
 
 volatile uint32_t msTicks = 0 ; // counter for 1ms SysTicks
 
@@ -316,6 +323,24 @@ inline void Update_FunMode()
 }
 	//uint32_t lux = light_read();
 
+inline void Update_Screen ()
+{
+	sprintf (oled_string,"%3u",lux); 	// %6d (print as a decimal integer with a width of at least 6 wide)
+										// %3.2f	(print as a floating point at least 3 wide and a precision of 2)
+	oled_putString (40,SECOND_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+	sprintf (oled_string,"%3.1f",temperature/10.0);
+	oled_putString (35,THIRD_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+	oled_putString (64,THIRD_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    sprintf (oled_string,"%5d",x);
+    oled_putString (3,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+    sprintf (oled_string,"%5d",y);
+    oled_putString (32,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+
+	sprintf (oled_string,"%5d",z);
+	oled_putString (62,FIFTH_LINE, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 	printf("====YOU JUST ENTER ACTIVE MODE====,bat=%d\n",bat);
 }
 
@@ -406,7 +431,6 @@ int main (void) {
     light_setIrqInCycles(LIGHT_CYCLE_4);
 
     // Enable GPIO Interrupt at PIN
-    LPC_GPIOINT->IO2IntEnF |= 1<<5; //Port2.5, light sensor
 
 
 
@@ -454,23 +478,35 @@ int main (void) {
 
     		sampling_rate = (fun_mode && active_mode == ACTIVE_FP) ? (SENSOR_SAMPLING_TIME / 4) : SENSOR_SAMPLING_TIME;
     		//if ( (msTicks >> 10 & 0x0011) && !(prev_msTick >> 10 & 0x0011) ) //4.096s, update active
-    		if (active_mode == ACTIVE_NO && (msTicks - prev_sensor_sampling >= SENSOR_SAMPLING_TIME) )
+
+
+    		lux = light_read();
+
+    		do_update |= GetLightInterrupt();
+
+			if (do_update)
+			{
+				set_active_mod();
+				light_clearIrqStatus();
+				if (active_mode == ACTIVE_PS)
+					do_update = 0;
+			}
+    		if ( do_update || active_mode != ACTIVE_PS && (msTicks - prev_sensor_sampling >= sampling_rate) )
     		{
-    			// light sensor
-    			sprintf (oled_string,"%3u",light_read()); 	// %6d (print as a decimal integer with a width of at least 6 wide)
-    												// %3.2f	(print as a floating point at least 3 wide and a precision of 2)
-    			oled_putString (40,10, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
 
-    			sprintf (oled_string,"%3.1f",temp_read()/10.0);
-    			oled_putString (40,20, oled_string, OLED_COLOR_WHITE, OLED_COLOR_BLACK );
+    			rgb_setLeds (RGB_BLUE | RGB_RED);
 
-    	        acc_read(&x, &y, &z);
-    	        x = x+xoff;
-    	        y = y+yoff;
-    	        z = z+zoff;
+    			acc_read(&x, &y, &z);
+				x = x+xoff;
+				y = y+yoff;
+				z = z+zoff;
+
+				Update_Screen();
 
     			//printf("4 Sec has passed\n"); // update sensors HERE
+    			rgb_setLeds (RGB_RED);
     			prev_sensor_sampling = msTicks;
+    			do_update = 0;
     		}
 
 
