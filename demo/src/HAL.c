@@ -145,8 +145,13 @@ void init_GPIO(void)
 	PinCfg.Portnum = 1;
 	PinCfg.Pinnum = 31;
 	PINSEL_ConfigPin(&PinCfg);
-
 	GPIO_SetDir(1, 1<<31, 0); // Enable SW4, PIO1_4
+
+	PinCfg.Portnum = 2;
+	PinCfg.Pinnum = 10;
+	PINSEL_ConfigPin(&PinCfg);
+	GPIO_SetDir(2, 1<<10, 0); // Enable SW3, PIO0_1
+
 
 	PinCfg.Funcnum = 0; // gpio
 	PinCfg.OpenDrain = 0;
@@ -205,6 +210,9 @@ void interrupt_init()
     /* set temperature sensor interrupt*/
     GPIO_SetDir(0, 1<<PIN_TEMP_INT, 0); // 0: Input
     LPC_GPIOINT->IO0IntEnR |= 1<<PIN_TEMP_INT; //Port0.2, temp sensor
+    LPC_GPIOINT->IO2IntEnF |= 1<<10; // Port2.10, SW3
+    NVIC_EnableIRQ(EINT3_IRQn);
+
 }
 
 

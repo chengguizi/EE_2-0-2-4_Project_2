@@ -54,7 +54,7 @@ static inline void offUART() // OFF the power supply of UART
 		return;
 
 	//UART_DeInit(LPC_UART3);
-	//UART_IntConfig(LPC_UART3,UART_INTCFG_RBR,DISABLE);
+	UART_IntConfig(LPC_UART3,UART_INTCFG_RBR,DISABLE);
 	NVIC_DisableIRQ(UART3_IRQn);
 	sensors.TRANS = DISABLE;
 }
@@ -77,7 +77,10 @@ static inline void onUART()
 
 static inline void offSensors(uint8_t preserve_light)
 {
-	NVIC_DisableIRQ(EINT3_IRQn); // Off the Interrupt for Tempuerature Sensor
+	//NVIC_DisableIRQ(EINT3_IRQn); // Off the Interrupt for Tempuerature Sensor
+
+	LPC_GPIOINT->IO0IntClr |= 1<<PIN_TEMP_INT; //Port0.2, temp sensor
+
 	sensors.TEMP = DISABLE;
 
 	if (sensors.ACCEL == ENABLE)
@@ -89,7 +92,8 @@ static inline void offSensors(uint8_t preserve_light)
 
 static inline void onSensors(uint8_t preserve_light)
 {
-	NVIC_EnableIRQ(EINT3_IRQn); // Tempurature Sensor
+	//NVIC_EnableIRQ(EINT3_IRQn); // Tempurature Sensor
+	LPC_GPIOINT->IO0IntEnR |= 1<<PIN_TEMP_INT; //Port0.2, temp sensor
 	sensors.TEMP = ENABLE;
 
 	if (sensors.ACCEL != ENABLE)

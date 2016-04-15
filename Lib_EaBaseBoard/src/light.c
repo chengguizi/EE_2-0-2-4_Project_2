@@ -149,7 +149,8 @@ static uint8_t readControlReg(void)
 void light_init (void)
 {
 	GPIO_SetDir(PORT_LIGHT_INT, 1<<PIN_LIGHT_INT, 0); // 0: Input
-	light_setIrqInCycles(LIGHT_CYCLE_4);
+	//light_setIrqInCycles(LIGHT_CYCLE_4);
+	light_setIrqInCycles(LIGHT_CYCLE_1);
 	/* nothing to initialize. light_enable enables the sensor */
 }
 
