@@ -37,5 +37,6 @@ typedef struct{
 
 extern volatile SensorStatus sensors;
 extern volatile uint32_t msTicks;
+extern uint8_t CommStatus;
 
 #endif /* MAIN_H_ */

@@ -62,7 +62,7 @@ static int32_t zoff = 0;
 
 static volatile uint8_t do_update = 0;
 
-static uint8_t CommStatus = 0;
+uint8_t CommStatus = 0;
 
 /************************************************************
  *
@@ -75,41 +75,41 @@ volatile uint32_t msTicks = 0; // counter for 1ms SysTicks
 void SysTick_Handler(void) { // CHANGE TO 5MS ROUTINE
 
 	static uint8_t debounce_tick = 0;
-		static uint8_t blocking = 0;
+	static uint8_t blocking = 0;
 
-		msTicks = msTicks + 5;
+	msTicks = msTicks + 5;
 
-		if (getSW4()) // switch is de-pressed
-		{
-			if (debounce_tick >= 2 && !blocking) // Condition that satisfy short press
-					{
-				switch (master_mode) {
-				case MODE_NONE:
-					master_mode = MODE_CAT;
-					break;
-				case MODE_CAT:
-					master_mode = MODE_ACTIVE;
-					break;
-				case MODE_ACTIVE:
-					master_mode = MODE_CAT;
-					break;
-				}
+	if (getSW4()) // switch is de-pressed
+	{
+		if (debounce_tick >= 2 && !blocking) // Condition that satisfy short press
+				{
+			switch (master_mode) {
+			case MODE_NONE:
+				master_mode = MODE_CAT;
+				break;
+			case MODE_CAT:
+				master_mode = MODE_ACTIVE;
+				break;
+			case MODE_ACTIVE:
+				master_mode = MODE_CAT;
+				break;
 			}
-
-			debounce_tick = 0;
-			blocking = 0;
-			return;
 		}
 
-		if (blocking) // active low
-			return;
-
-		if (debounce_tick++ >= 200) {
-			fun_mode = !fun_mode;
-			blocking = 1;
-		}
-
+		debounce_tick = 0;
+		blocking = 0;
 		return;
+	}
+
+	if (blocking) // active low
+		return;
+
+	if (debounce_tick++ >= 200) {
+		fun_mode = !fun_mode;
+		blocking = 1;
+	}
+
+	return;
 }
 
 void set_active_mod() // assume lux is already be updated
@@ -184,7 +184,7 @@ void EINT3_IRQHandler(void) // Triggered roughly every 3 ms
 
 	}
 
-	NVIC_ClearPendingIRQ(EINT3_IRQn);
+	//NVIC_ClearPendingIRQ(EINT3_IRQn);
 }
 
 void UART3_IRQHandler(void) {
@@ -209,37 +209,35 @@ void UART3_IRQHandler(void) {
 
 				push_String("\r\n====   I-WATCH Status Telemetry   =====\r\n");
 
-				strcpy(msg,"Light: ");
-				if(sensors.LIGHT == ENABLE)
+				strcpy(msg, "Light: ");
+				if (sensors.LIGHT == ENABLE)
 					strcat(msg, "Active | ");
 				else
 					strcat(msg, "Idle | ");
 
 				strcat(msg, "Temp: ");
-				if(sensors.TEMP == ENABLE)
+				if (sensors.TEMP == ENABLE)
 					strcat(msg, "Active | ");
-						else
+				else
 					strcat(msg, "Idle | ");
 
 				strcat(msg, "Accel: ");
-				if(sensors.ACCEL == ENABLE)
+				if (sensors.ACCEL == ENABLE)
 					strcat(msg, "Active\r\n");
-						else
+				else
 					strcat(msg, "Idle\r\n");
 				push_String(msg);
 
-				sprintf(msg, "Battery: %d%%\r\n", (int32_t) bat*100/15);
+				sprintf(msg, "Battery: %d%%\r\n", (int32_t) bat * 100 / 15);
 				push_String(msg);
 
 			}
 
-		} else if(char_buffer == '\b')
-		{
+		} else if (char_buffer == '\b') {
 			pointer--;
-			if(pointer<0)
-				pointer=0;
-		}
-		else
+			if (pointer < 0)
+				pointer = 0;
+		} else
 			uartBuffer[pointer++] = char_buffer;
 
 	}
@@ -481,7 +479,6 @@ void Update_Battery(uint32_t * prev_bat_sampling) {
 			pca9532_setLeds(1 << ++bat, 0x0000);
 		}
 
-
 		Update_FunMode();
 		*prev_bat_sampling = msTicks;
 
@@ -490,7 +487,7 @@ void Update_Battery(uint32_t * prev_bat_sampling) {
 			push_String(msg);
 			CommStatus = 0;
 
-		} else if (prev_bat == 14 && bat == 15) {
+		} else if (prev_bat >= 14 && bat == 15) {
 
 			sprintf(msg, "Satellite Communication Link Established.\r\n");
 			push_String(msg);
@@ -507,7 +504,7 @@ void Update_Light_Mode(uint32_t *prev_sensor_sampling) {
 
 	sampling_rate =
 			(fun_mode && active_mode == ACTIVE_FP) ?
-					(SENSOR_SAMPLING_TIME / 6) : SENSOR_SAMPLING_TIME;
+					(SENSOR_SAMPLING_TIME / 8) : SENSOR_SAMPLING_TIME;
 
 	lux = light_read();
 	do_update |= GetLightInterrupt();
@@ -519,12 +516,10 @@ void Update_Light_Mode(uint32_t *prev_sensor_sampling) {
 			do_update = 0;
 	}
 
-	if (SCAN_FLAG) {
+	if (SCAN_FLAG)
 		onSensors(1);
-		do_update = 1;
-	}
 
-	if (do_update
+	if (SCAN_FLAG || do_update
 			|| active_mode != ACTIVE_PS
 					&& (msTicks - *prev_sensor_sampling >= sampling_rate)) {
 
@@ -560,7 +555,6 @@ void Update_Light_Mode(uint32_t *prev_sensor_sampling) {
 
 		do_update = 0;
 	}
-
 }
 
 void Update_Light_Accel() {
@@ -584,21 +578,21 @@ int main(void) {
 	uint32_t prev_bat_sampling = 0;
 	uint32_t prev_sensor_sampling = 0;
 
-	/* ---- Speaker ------> */
-
-	GPIO_SetDir(2, 1 << 0, 1);
-	GPIO_SetDir(2, 1 << 1, 1);
-
-	GPIO_SetDir(0, 1 << 27, 1);
-	GPIO_SetDir(0, 1 << 28, 1);
-	GPIO_SetDir(2, 1 << 13, 1);
-	GPIO_SetDir(0, 1 << 26, 1);
-
-	GPIO_ClearValue(0, 1 << 27); //LM4811-clk
-	GPIO_ClearValue(0, 1 << 28); //LM4811-up/dn
-	GPIO_ClearValue(2, 1 << 13); //LM4811-shutdn
-
-	/* <---- Speaker ------ */
+//	/* ---- Speaker ------> */
+//
+//	GPIO_SetDir(2, 1 << 0, 1);
+//	GPIO_SetDir(2, 1 << 1, 1);
+//
+//	GPIO_SetDir(0, 1 << 27, 1);
+//	GPIO_SetDir(0, 1 << 28, 1);
+//	GPIO_SetDir(2, 1 << 13, 1);
+//	GPIO_SetDir(0, 1 << 26, 1);
+//
+//	GPIO_ClearValue(0, 1 << 27); //LM4811-clk
+//	GPIO_ClearValue(0, 1 << 28); //LM4811-up/dn
+//	GPIO_ClearValue(2, 1 << 13); //LM4811-shutdn
+//
+//	/* <---- Speaker ------ */
 
 	onetime_init(); // one-time Initialization + CAT mode step 1
 
@@ -646,6 +640,7 @@ void check_failed(uint8_t *file, uint32_t line) {
 	 ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
 	printf("Wrong parameters value: file %s on line %d\r\n", file, line);
 	/* Infinite loop */
-	while (1);
+	while (1)
+		;
 }
 
